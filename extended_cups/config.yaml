@@ -3,7 +3,7 @@ version: 1.2.1
 slug: extended_cups
 name: Extended CUPS Print Server
 description: CUPS print server with network printing, USB printer support, and built-in thermal printer drivers
-url: https://github.com/kfirsa/cups-addon
+url: https://github.com/kfirsa/hassio-addons
 arch:
   - armhf
   - armv7
