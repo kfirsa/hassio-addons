@@ -20,8 +20,11 @@ RUN \
         cups-filters \
         ghostscript \
         libjpeg-turbo \
+        libpng \
+        libtiff \
         net-snmp \
-        epson-inkjet-printer-escpr \
+        gutenprint \
+        gutenprint-cups \
         usbutils \
         libusb \
         curl \
@@ -49,29 +52,14 @@ RUN sed -i '/#include <signal.h>/a\\n// Portable signal handler type for musl li
     make clean && \
     rm -rf /tmp/zj-58
 
-# Preinstall popular printer PPD files
-# These are commonly used printers that users frequently need
+# Preinstall one example PPD file
+# Users can add more via ppd_urls configuration option
 RUN mkdir -p /usr/share/cups/model/openprinting && \
-    echo "Preinstalling popular printer PPD files..." && \
-    # HP LaserJet 1020 (very popular)
+    echo "Preinstalling example PPD file..." && \
+    # HP LaserJet 1020 (very popular, good example)
     curl -f -L -s -o /usr/share/cups/model/openprinting/hp-laserjet_1020.ppd \
         "https://www.openprinting.org/download/PPD/HP/hp-laserjet_1020.ppd" || true && \
-    # HP LaserJet P1005
-    curl -f -L -s -o /usr/share/cups/model/openprinting/hp-laserjet_p1005.ppd \
-        "https://www.openprinting.org/download/PPD/HP/hp-laserjet_p1005.ppd" || true && \
-    # Brother QL-800 (thermal label printer)
-    curl -f -L -s -o /usr/share/cups/model/openprinting/brother-ql800.ppd \
-        "https://www.openprinting.org/download/PPD/Brother/brother-ql800.ppd" || true && \
-    # Brother HL-2270DW
-    curl -f -L -s -o /usr/share/cups/model/openprinting/brother-hl2270dw.ppd \
-        "https://www.openprinting.org/download/PPD/Brother/brother-hl2270dw.ppd" || true && \
-    # Canon PIXMA MP250
-    curl -f -L -s -o /usr/share/cups/model/openprinting/canon-pixma_mp250.ppd \
-        "https://www.openprinting.org/download/PPD/Canon/canon-pixma_mp250.ppd" || true && \
-    # Epson Stylus Photo R2000
-    curl -f -L -s -o /usr/share/cups/model/openprinting/epson-stylus_photo_r2000.ppd \
-        "https://www.openprinting.org/download/PPD/Epson/epson-stylus_photo_r2000.ppd" || true && \
-    echo "Popular PPD files preinstalled (some may have failed if URLs changed)"
+    echo "Example PPD file preinstalled (users can add more via ppd_urls config)"
 
 # Remove build dependencies to minimize image size
 RUN apk del gcc make g++ musl-dev cups-dev cups-filters-dev
