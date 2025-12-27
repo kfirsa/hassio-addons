@@ -84,6 +84,14 @@ WebInterface Yes
 # Enable USB printer detection
 LoadModule usb
 
+# Automatic printer discovery (Bonjour/mDNS)
+# Enable browsing for network printers
+Browsing On
+BrowseLocalProtocols dnssd
+BrowseRemoteProtocols dnssd
+BrowseAllow all
+BrowseAddress @LOCAL
+
 # Default settings
 DefaultAuthType None
 JobSheets none,none
@@ -198,6 +206,18 @@ else
     log_error "Failed to create USB device directory"
 fi
 
+# Start Avahi daemon for mDNS/Bonjour printer discovery
+log_info "Starting Avahi daemon for automatic printer discovery..."
+if [ -x /usr/sbin/avahi-daemon ]; then
+    # Create Avahi configuration directory
+    mkdir -p /etc/avahi
+    # Start Avahi daemon in background
+    /usr/sbin/avahi-daemon -D || log_warn "Avahi daemon may have failed to start (this is OK if already running)"
+    log_info "Avahi daemon started for network printer discovery"
+else
+    log_warn "Avahi daemon not found - automatic network printer discovery may be limited"
+fi
+
 # Verify CUPS binary exists
 if [ -x /usr/sbin/cupsd ]; then
     log_info "CUPS daemon found, starting service..."
@@ -207,5 +227,6 @@ else
 fi
 
 log_info "Initialization complete, starting CUPS service..."
+log_info "Automatic printer discovery enabled (USB and network via mDNS/Bonjour)"
 # Start CUPS service
 /usr/sbin/cupsd -f

@@ -23,6 +23,9 @@ RUN \
         libpng \
         tiff \
         net-snmp \
+        avahi \
+        avahi-libs \
+        dbus \
         usbutils \
         libusb \
         curl \
