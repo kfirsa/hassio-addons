@@ -28,5 +28,6 @@ options:
 schema:
   admin_username: str
   admin_password: password
-  ppd_urls: list(str)
+  ppd_urls:
+    - str
 startup: services
