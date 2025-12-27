@@ -1,0 +1,32 @@
+---
+version: 1.2.1
+slug: extended_cups
+name: Extended CUPS Print Server
+description: CUPS print server with network printing, USB printer support, and built-in thermal printer drivers
+url: https://github.com/kfirsa/cups-addon
+arch:
+  - armhf
+  - armv7
+  - aarch64
+  - amd64
+  - i386
+hassio_api: true
+host_network: true
+usb: true  # Enable USB device access for thermal printers
+map:
+  - data:rw
+  - share:rw
+init: false
+ports:
+  631/tcp: 631
+ports_description:
+  631/tcp: CUPS web interface and printing port
+options:
+  admin_username: "admin"
+  admin_password: "admin"
+  ppd_urls: []
+schema:
+  admin_username: str
+  admin_password: password
+  ppd_urls: list
+startup: services
