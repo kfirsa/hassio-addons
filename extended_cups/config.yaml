@@ -24,7 +24,13 @@ ports_description:
 options:
   admin_username: "admin"
   admin_password: "admin"
-  ppd_urls: []
+  ppd_urls:
+    - "https://www.openprinting.org/download/PPD/HP/hp-laserjet_1020.ppd"
+    - "https://www.openprinting.org/download/PPD/HP/hp-laserjet_p1005.ppd"
+    - "https://www.openprinting.org/download/PPD/Brother/brother-ql800.ppd"
+    - "https://www.openprinting.org/download/PPD/Brother/brother-hl2270dw.ppd"
+    - "https://www.openprinting.org/download/PPD/Canon/canon-pixma_mp250.ppd"
+    - "https://www.openprinting.org/download/PPD/Epson/epson-stylus_photo_r2000.ppd"
 schema:
   admin_username: str
   admin_password: password
