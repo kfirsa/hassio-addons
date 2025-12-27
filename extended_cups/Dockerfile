@@ -23,8 +23,6 @@ RUN \
         libpng \
         libtiff \
         net-snmp \
-        gutenprint \
-        gutenprint-cups \
         usbutils \
         libusb \
         curl \
@@ -33,7 +31,10 @@ RUN \
         g++ \
         musl-dev \
         cups-dev \
-        cups-filters-dev
+        cups-filters-dev && \
+    apk add --no-cache \
+        gutenprint \
+        gutenprint-cups
 
 # Build ZJ-58 thermal printer driver
 # Original driver by Aleksey N. Vinogradov (2014)
