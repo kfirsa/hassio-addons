@@ -21,7 +21,7 @@ RUN \
         ghostscript \
         libjpeg-turbo \
         libpng \
-        libtiff \
+        tiff \
         net-snmp \
         usbutils \
         libusb \
