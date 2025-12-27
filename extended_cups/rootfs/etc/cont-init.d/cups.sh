@@ -1,19 +1,43 @@
 #!/usr/bin/with-contenv bash
 
+# Logging functions with timestamps and levels
+log_info() {
+    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') $*"
+}
+
+log_warn() {
+    echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+}
+
+log_error() {
+    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+}
+
+log_info "Starting Extended CUPS Print Server initialization..."
+
 # Create CUPS data directories for persistence
-mkdir -p /data/cups/cache
-mkdir -p /data/cups/logs
-mkdir -p /data/cups/state
-mkdir -p /data/cups/config
+log_info "Creating CUPS data directories..."
+if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config; then
+    log_info "CUPS data directories created successfully"
+else
+    log_error "Failed to create CUPS data directories"
+    exit 1
+fi
 
 # Set proper permissions
-chown -R root:lp /data/cups
-chmod -R 775 /data/cups
+log_info "Setting permissions for CUPS data directories..."
+if chown -R root:lp /data/cups && chmod -R 775 /data/cups; then
+    log_info "Permissions set successfully"
+else
+    log_warn "Some permission operations may have failed"
+fi
 
 # Create CUPS configuration directory if it doesn't exist
+log_info "Creating CUPS configuration directory..."
 mkdir -p /etc/cups
 
 # Basic CUPS configuration without admin authentication
+log_info "Generating CUPS configuration file..."
 cat > /data/cups/config/cupsd.conf << EOL
 # Listen on all interfaces
 Listen 0.0.0.0:631
@@ -66,12 +90,29 @@ JobSheets none,none
 PreserveJobHistory No
 EOL
 
-# Create a symlink from the default config location to our persistent location
-ln -sf /data/cups/config/cupsd.conf /etc/cups/cupsd.conf
-ln -sf /data/cups/config/printers.conf /etc/cups/printers.conf
+if [ -f /data/cups/config/cupsd.conf ]; then
+    log_info "CUPS configuration file created successfully"
+else
+    log_error "Failed to create CUPS configuration file"
+    exit 1
+fi
 
-# Note: ZJ-58 thermal printer driver (rastertozj filter and PPD) is installed
-# during image build in /usr/lib/cups/filter/ and /usr/share/cups/model/zjiang/
+# Create a symlink from the default config location to our persistent location
+log_info "Creating configuration symlinks..."
+if ln -sf /data/cups/config/cupsd.conf /etc/cups/cupsd.conf && \
+   ln -sf /data/cups/config/printers.conf /etc/cups/printers.conf; then
+    log_info "Configuration symlinks created successfully"
+else
+    log_warn "Some symlink operations may have failed"
+fi
+
+# Verify ZJ-58 driver installation
+log_info "Verifying ZJ-58 thermal printer driver installation..."
+if [ -f /usr/lib/cups/filter/rastertozj ] && [ -f /usr/share/cups/model/zjiang/ZJ-58.ppd ]; then
+    log_info "ZJ-58 driver found: filter and PPD installed"
+else
+    log_warn "ZJ-58 driver files not found - thermal printer support may be limited"
+fi
 
 # Function to validate PPD file
 validate_ppd() {
@@ -91,9 +132,16 @@ validate_ppd() {
 # Home Assistant passes list options as JSON arrays in environment variables
 PPD_URLS_ENV="${PPD_URLS:-[]}"
 if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
-    echo "Downloading additional PPD files..."
+    log_info "PPD URLs configured, starting download process..."
     # Create directory for downloaded PPDs
-    mkdir -p /usr/share/cups/model/openprinting
+    if mkdir -p /usr/share/cups/model/openprinting; then
+        log_info "OpenPrinting PPD directory ready"
+    else
+        log_error "Failed to create OpenPrinting PPD directory"
+    fi
+    
+    download_count=0
+    error_count=0
     
     # Parse PPD URLs from JSON array format
     # Extract URLs from JSON array: ["url1", "url2"] -> url1, url2
@@ -105,28 +153,59 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                 filename="${filename}.ppd"
             fi
             temp_file="/tmp/${filename}"
-            echo "Downloading PPD: $filename from $url"
+            log_info "Downloading PPD: $filename from $url"
             
             # Download to temporary file first
             if curl -f -L -s -o "$temp_file" "$url"; then
                 # Validate that it's a valid PPD file
                 if validate_ppd "$temp_file"; then
-                    mv "$temp_file" "/usr/share/cups/model/openprinting/$filename"
-                    echo "Successfully downloaded and validated: $filename"
+                    if mv "$temp_file" "/usr/share/cups/model/openprinting/$filename"; then
+                        log_info "Successfully downloaded and validated: $filename"
+                        download_count=$((download_count + 1))
+                    else
+                        log_error "Failed to move validated PPD file: $filename"
+                        rm -f "$temp_file"
+                        error_count=$((error_count + 1))
+                    fi
                 else
                     rm -f "$temp_file"
-                    echo "ERROR: Rejected invalid PPD file from $url - file does not appear to be a valid PPD file"
+                    log_error "Rejected invalid PPD file from $url - file does not appear to be a valid PPD file"
+                    error_count=$((error_count + 1))
                 fi
             else
-                echo "ERROR: Failed to download PPD from $url"
+                log_error "Failed to download PPD from $url"
+                error_count=$((error_count + 1))
             fi
         fi
     done
+    
+    log_info "PPD download process completed"
+else
+    log_info "No additional PPD URLs configured, skipping download"
 fi
 
 # Ensure USB devices are accessible
-# Create USB device directory if it doesn't exist
-mkdir -p /dev/bus/usb
+log_info "Setting up USB device access..."
+if mkdir -p /dev/bus/usb; then
+    log_info "USB device directory ready"
+    # Check if USB devices are accessible
+    if [ -d /dev/bus/usb ] && [ -r /dev/bus/usb ]; then
+        log_info "USB backend should be functional"
+    else
+        log_warn "USB device directory may not be accessible - USB printers may not be detected"
+    fi
+else
+    log_error "Failed to create USB device directory"
+fi
 
+# Verify CUPS binary exists
+if [ -x /usr/sbin/cupsd ]; then
+    log_info "CUPS daemon found, starting service..."
+else
+    log_error "CUPS daemon not found at /usr/sbin/cupsd"
+    exit 1
+fi
+
+log_info "Initialization complete, starting CUPS service..."
 # Start CUPS service
 /usr/sbin/cupsd -f
