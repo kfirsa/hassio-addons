@@ -39,6 +39,9 @@ mkdir -p /etc/cups
 # Basic CUPS configuration without admin authentication
 log_info "Generating CUPS configuration file..."
 cat > /data/cups/config/cupsd.conf << EOL
+# Server root directory - ensures all config files are in persistent location
+ServerRoot /data/cups/config
+
 # Listen on all interfaces
 Listen 0.0.0.0:631
 
@@ -91,6 +94,8 @@ BrowseLocalProtocols dnssd
 BrowseRemoteProtocols dnssd
 BrowseAllow all
 BrowseAddress @LOCAL
+# Poll remote printers periodically for discovery
+BrowsePoll all
 
 # Default settings
 DefaultAuthType None
@@ -105,13 +110,32 @@ else
     exit 1
 fi
 
-# Create a symlink from the default config location to our persistent location
+# Initialize printers.conf in persistent location if it doesn't exist
+# This ensures printer configurations persist across restarts and upgrades
+log_info "Initializing printers configuration file..."
+if [ ! -f /data/cups/config/printers.conf ]; then
+    touch /data/cups/config/printers.conf
+    chown root:lp /data/cups/config/printers.conf
+    chmod 640 /data/cups/config/printers.conf
+    log_info "Created new printers.conf in persistent location"
+else
+    log_info "Existing printers.conf found in persistent location"
+fi
+
+# Create symlinks for compatibility (CUPS will use ServerRoot, but symlinks ensure compatibility)
 log_info "Creating configuration symlinks..."
 if ln -sf /data/cups/config/cupsd.conf /etc/cups/cupsd.conf && \
    ln -sf /data/cups/config/printers.conf /etc/cups/printers.conf; then
     log_info "Configuration symlinks created successfully"
 else
     log_warn "Some symlink operations may have failed"
+fi
+
+# Verify printers.conf is accessible
+if [ -f /data/cups/config/printers.conf ] && [ -r /data/cups/config/printers.conf ]; then
+    log_info "Printers configuration file is ready and accessible"
+else
+    log_error "Printers configuration file is not accessible"
 fi
 
 # Verify ZJ-58 driver installation
@@ -207,13 +231,41 @@ else
 fi
 
 # Start Avahi daemon for mDNS/Bonjour printer discovery
-log_info "Starting Avahi daemon for automatic printer discovery..."
+log_info "Setting up Avahi daemon for automatic printer discovery..."
 if [ -x /usr/sbin/avahi-daemon ]; then
     # Create Avahi configuration directory
     mkdir -p /etc/avahi
+    # Create minimal Avahi configuration if it doesn't exist
+    if [ ! -f /etc/avahi/avahi-daemon.conf ]; then
+        cat > /etc/avahi/avahi-daemon.conf << AVAHI_EOF
+[server]
+host-name=cups
+use-ipv4=yes
+use-ipv6=no
+enable-dbus=no
+
+[wide-area]
+enable-wide-area=yes
+
+[publish]
+publish-hinfo=no
+publish-workstation=no
+publish-domain=yes
+
+[reflector]
+enable-reflector=no
+AVAHI_EOF
+        log_info "Created Avahi daemon configuration"
+    fi
+    
     # Start Avahi daemon in background
-    /usr/sbin/avahi-daemon -D || log_warn "Avahi daemon may have failed to start (this is OK if already running)"
-    log_info "Avahi daemon started for network printer discovery"
+    if /usr/sbin/avahi-daemon -D; then
+        log_info "Avahi daemon started successfully for network printer discovery"
+        # Give Avahi a moment to initialize
+        sleep 1
+    else
+        log_warn "Avahi daemon may have failed to start (this is OK if already running)"
+    fi
 else
     log_warn "Avahi daemon not found - automatic network printer discovery may be limited"
 fi
@@ -227,6 +279,9 @@ else
 fi
 
 log_info "Initialization complete, starting CUPS service..."
-log_info "Automatic printer discovery enabled (USB and network via mDNS/Bonjour)"
+log_info "Automatic printer discovery enabled:"
+log_info "  - USB printers: Auto-detected via USB backend"
+log_info "  - Network printers: Auto-discovered via mDNS/Bonjour (Avahi)"
+log_info "  - Printer configurations: Persisted in /data/cups/config"
 # Start CUPS service
 /usr/sbin/cupsd -f
