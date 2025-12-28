@@ -16,17 +16,40 @@ log_error() {
 log_info "Starting Extended CUPS Print Server initialization..."
 
 # Create CUPS data directories for persistence
-# Note: /data maps to /config/addon_configs/<slug> on the host via 'data:rw' mapping
-log_info "Creating CUPS data directories in persistent storage (/data)..."
+# /data is the standard persistent storage volume in Home Assistant addons
+# addon_config:rw maps to /config in container and /addon_configs/{REPO}_{slug} on host
+log_info "Creating CUPS data directories in persistent storage..."
 if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config /data/cups/ppds; then
-    log_info "CUPS data directories created successfully"
+    log_info "CUPS data directories created successfully in /data/cups"
+    
+    # Also create directories in /config for addon_config mapping (user-accessible)
+    # This makes files visible in /addon_configs/{REPO}_extended_cups on the host
+    if mkdir -p /config/cups/config /config/cups/ppds; then
+        log_info "Created directories in /config for addon_config mapping"
+        # Create symlinks from /config to /data to avoid duplication
+        # Users can access files via /addon_configs, but data is stored in /data
+        if [ ! -L /config/cups/config ] && [ ! -d /config/cups/config ]; then
+            ln -sf /data/cups/config /config/cups/config
+            log_info "Created symlink: /config/cups/config -> /data/cups/config"
+        fi
+        if [ ! -L /config/cups/ppds ] && [ ! -d /config/cups/ppds ]; then
+            ln -sf /data/cups/ppds /config/cups/ppds
+            log_info "Created symlink: /config/cups/ppds -> /data/cups/ppds"
+        fi
+    fi
+    
     # Verify directories exist and show their locations
-    log_info "Persistent storage directories:"
-    log_info "  - Config: /data/cups/config (maps to /config/addon_configs/extended_cups/cups/config on host)"
-    log_info "  - PPDs: /data/cups/ppds (maps to /config/addon_configs/extended_cups/cups/ppds on host)"
-    log_info "  - Cache: /data/cups/cache"
-    log_info "  - Logs: /data/cups/logs"
-    log_info "  - State: /data/cups/state"
+    log_info "Persistent storage locations:"
+    log_info "  - /data/cups/config (primary persistent storage)"
+    log_info "  - /config/cups/config (accessible via /addon_configs/{REPO}_extended_cups/cups/config on host)"
+    log_info "  - /data/cups/ppds (PPD files storage)"
+    log_info "  - /config/cups/ppds (accessible via /addon_configs/{REPO}_extended_cups/cups/ppds on host)"
+    
+    # Create a marker file to ensure directories are visible
+    echo "# CUPS Persistent Storage" > /data/cups/.persistent_storage_marker
+    echo "# This directory contains CUPS configuration and data" >> /data/cups/.persistent_storage_marker
+    echo "# Created: $(date)" >> /data/cups/.persistent_storage_marker
+    
     # Verify we can write to the persistent location
     if touch /data/cups/.write_test 2>/dev/null && rm -f /data/cups/.write_test 2>/dev/null; then
         log_info "Verified write access to persistent storage"

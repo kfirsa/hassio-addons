@@ -16,6 +16,7 @@ usb: true  # Enable USB device access for thermal printers
 map:
   - data:rw
   - share:rw
+  - addon_config:rw
 init: false
 ports:
   631/tcp: 631
