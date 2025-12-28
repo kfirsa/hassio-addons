@@ -1,0 +1,5 @@
+#!/usr/bin/with-contenv bash
+
+# This script runs when the config-sync service stops
+echo "[CONFIG-SYNC] [INFO] $(date '+%Y-%m-%d %H:%M:%S') Configuration sync service stopped"
+

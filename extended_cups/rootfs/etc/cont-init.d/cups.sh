@@ -752,7 +752,10 @@ log_info "  - USB printers: Auto-detected via USB backend"
 log_info "  - Network printers: Auto-discovered via mDNS/Bonjour (Avahi)"
 log_info "  - Printer configurations: Persisted in /data/cups/config (visible via /config/cups/config)"
 log_info "  - PPD files: Persisted in /data/cups/ppds (visible via /config/cups/ppds)"
+log_info "  - Configuration sync: Automatic sync service will keep /config files up-to-date"
 if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
     log_info "  - Debug mode: ENABLED - Check logs for detailed information"
 fi
-log_info "CUPS service will be started by s6 service manager"
+log_info "Services starting:"
+log_info "  - CUPS daemon (port 631)"
+log_info "  - Configuration sync service (monitors printers.conf for changes)"

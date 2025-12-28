@@ -1,0 +1,96 @@
+#!/usr/bin/with-contenv bash
+
+# Logging functions
+log_info() {
+    echo "[CONFIG-SYNC] [INFO] $(date '+%Y-%m-%d %H:%M:%S') $*"
+}
+
+log_warn() {
+    echo "[CONFIG-SYNC] [WARN] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+}
+
+log_error() {
+    echo "[CONFIG-SYNC] [ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+}
+
+log_info "Starting configuration file sync service..."
+
+# Wait for CUPS to initialize
+sleep 5
+
+# Function to sync printers.conf
+sync_printers_conf() {
+    local source_file="/data/cups/config/printers.conf"
+    local dest_file="/config/cups/config/printers.conf"
+    
+    if [ ! -f "$source_file" ]; then
+        return 1
+    fi
+    
+    # Check if file has changed (compare modification time or size)
+    if [ ! -f "$dest_file" ] || [ "$source_file" -nt "$dest_file" ] || \
+       [ "$(stat -c%s "$source_file" 2>/dev/null)" != "$(stat -c%s "$dest_file" 2>/dev/null)" ]; then
+        if cp "$source_file" "$dest_file" 2>/dev/null; then
+            chown root:lp "$dest_file" 2>/dev/null || true
+            chmod 640 "$dest_file" 2>/dev/null || true
+            file_size=$(stat -c%s "$source_file" 2>/dev/null || echo "0")
+            log_info "Synced printers.conf to /config (${file_size} bytes)"
+            return 0
+        else
+            log_warn "Failed to sync printers.conf"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Function to sync cupsd.conf (in case it changes)
+sync_cupsd_conf() {
+    local source_file="/data/cups/config/cupsd.conf"
+    local dest_file="/config/cups/config/cupsd.conf"
+    
+    if [ ! -f "$source_file" ]; then
+        return 1
+    fi
+    
+    if [ ! -f "$dest_file" ] || [ "$source_file" -nt "$dest_file" ]; then
+        if cp "$source_file" "$dest_file" 2>/dev/null; then
+            log_info "Synced cupsd.conf to /config"
+            return 0
+        fi
+    fi
+    return 0
+}
+
+# Initial sync
+log_info "Performing initial sync of configuration files..."
+sync_printers_conf
+sync_cupsd_conf
+
+# Check if inotifywait is available (from inotify-tools package)
+if command -v inotifywait >/dev/null 2>&1; then
+    log_info "Using inotifywait for real-time file monitoring"
+    
+    # Monitor printers.conf for changes
+    while true; do
+        inotifywait -e modify,create,close_write,moved_to \
+            -q /data/cups/config/printers.conf 2>/dev/null && \
+            sync_printers_conf
+        
+        # Also check cupsd.conf periodically
+        sync_cupsd_conf
+        
+        # Small sleep to avoid tight loop
+        sleep 1
+    done
+else
+    log_info "inotifywait not available, using polling method (checking every 5 seconds)"
+    
+    # Polling fallback: check every 5 seconds
+    while true; do
+        sync_printers_conf
+        sync_cupsd_conf
+        sleep 5
+    done
+fi
+
