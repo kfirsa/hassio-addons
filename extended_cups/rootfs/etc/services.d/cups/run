@@ -54,6 +54,8 @@ log_info "  - Logs: /data/cups/logs"
 log_info "  - State: /data/cups/state"
 log_info "  - Cache: /data/cups/cache"
 log_info "Starting CUPS daemon on port 631..."
+log_info "CUPS web interface will be available at: http://<your-ip>:631"
+log_info "IMPORTANT: Use HTTP (not HTTPS) - CUPS does not use SSL by default"
 
 # Start CUPS daemon in foreground (s6 will manage it)
 # Use -f to run in foreground and -l for logging to stderr
