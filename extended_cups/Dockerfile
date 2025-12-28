@@ -38,8 +38,7 @@ RUN \
         cups-filters-dev && \
     apk add --no-cache \
         gutenprint \
-        gutenprint-cups \
-        inotify-tools
+        gutenprint-cups
 
 # Build ZJ-58 thermal printer driver
 # Original driver by Aleksey N. Vinogradov (2014)

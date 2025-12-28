@@ -200,11 +200,14 @@ EOL
 
 if [ -f /data/cups/config/cupsd.conf ]; then
     log_info "CUPS configuration file created successfully at /data/cups/config/cupsd.conf"
-    # Copy to /config so it's visible in addon_config directory
-    if cp /data/cups/config/cupsd.conf /config/cups/config/cupsd.conf 2>/dev/null; then
-        log_info "CUPS configuration file copied to /config/cups/config/cupsd.conf (visible in addon_config)"
+    # Create symlink in /config so it's visible in addon_config directory
+    if [ -f /config/cups/config/cupsd.conf ] && [ ! -L /config/cups/config/cupsd.conf ]; then
+        rm -f /config/cups/config/cupsd.conf
+    fi
+    if ln -sf /data/cups/config/cupsd.conf /config/cups/config/cupsd.conf 2>/dev/null; then
+        log_info "Created symlink: /config/cups/config/cupsd.conf -> /data/cups/config/cupsd.conf"
     else
-        log_warn "Failed to copy cupsd.conf to /config/cups/config (files may not be visible in addon_config)"
+        log_warn "Failed to create symlink for cupsd.conf (files may not be visible in addon_config)"
     fi
 else
     log_error "Failed to create CUPS configuration file"
@@ -217,33 +220,33 @@ log_info "Initializing printers configuration file in persistent storage..."
 if [ ! -f /data/cups/config/printers.conf ]; then
     if touch /data/cups/config/printers.conf && chown root:lp /data/cups/config/printers.conf && chmod 640 /data/cups/config/printers.conf; then
         log_info "Created new printers.conf in persistent location: /data/cups/config/printers.conf"
-        # Also create in /config for visibility
-        if touch /config/cups/config/printers.conf && chown root:lp /config/cups/config/printers.conf && chmod 640 /config/cups/config/printers.conf; then
-            log_info "Created printers.conf in /config/cups/config (visible in addon_config)"
-        fi
-        log_info "  (Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf)"
     else
         log_error "Failed to create printers.conf in persistent location"
         exit 1
     fi
 else
     log_info "Existing printers.conf found in persistent location"
-    # Copy to /config if it doesn't exist there or is older
-    if [ ! -f /config/cups/config/printers.conf ] || [ /data/cups/config/printers.conf -nt /config/cups/config/printers.conf ]; then
-        cp /data/cups/config/printers.conf /config/cups/config/printers.conf 2>/dev/null && \
-        chown root:lp /config/cups/config/printers.conf 2>/dev/null && \
-        chmod 640 /config/cups/config/printers.conf 2>/dev/null && \
-        log_info "Synced printers.conf to /config/cups/config"
-    fi
     # Show file size to verify it has content
     file_size=$(stat -c%s /data/cups/config/printers.conf 2>/dev/null || echo "0")
     if [ "$file_size" -gt 0 ]; then
         log_info "Printers configuration file contains data ($file_size bytes)"
-        log_info "  File location: /data/cups/config/printers.conf"
-        log_info "  Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf"
     else
         log_info "Printers configuration file is empty (no printers configured yet)"
     fi
+fi
+
+# Create symlink from /config to /data for printers.conf
+# Remove existing file if it's not a symlink
+if [ -f /config/cups/config/printers.conf ] && [ ! -L /config/cups/config/printers.conf ]; then
+    rm -f /config/cups/config/printers.conf
+    log_info "Removed existing printers.conf file (will create symlink instead)"
+fi
+# Create symlink
+if ln -sf /data/cups/config/printers.conf /config/cups/config/printers.conf 2>/dev/null; then
+    log_info "Created symlink: /config/cups/config/printers.conf -> /data/cups/config/printers.conf"
+    log_info "  (Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf)"
+else
+    log_warn "Failed to create symlink for printers.conf"
 fi
 
 # Create a README file in /config/cups/config to help users understand the directory structure
@@ -358,12 +361,7 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                     ppd_name=$(basename "$ppd_file")
                     if [ ! -f "/data/cups/ppds/$ppd_name" ]; then
                         cp "$ppd_file" "/data/cups/ppds/$ppd_name"
-                        # Also copy to /config for visibility
-                        cp "$ppd_file" "/config/cups/ppds/$ppd_name" 2>/dev/null || true
-                        log_info "Migrated preinstalled PPD: $ppd_name (copied to /data and /config)"
-                    else
-                        # File exists in /data, ensure it's in /config too
-                        cp "/data/cups/ppds/$ppd_name" "/config/cups/ppds/$ppd_name" 2>/dev/null || true
+                        log_info "Migrated preinstalled PPD: $ppd_name"
                     fi
                 fi
             done
@@ -464,21 +462,9 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                         echo "${filename}:${url}:$(date +%s)" >> "${metadata_file}.tmp"
                         mv "${metadata_file}.tmp" "$metadata_file"
                         
-                        # Also copy to /config for visibility
-                        if cp "$persistent_file" "/config/cups/ppds/$filename" 2>/dev/null; then
-                            log_info "Successfully downloaded and validated: $filename (${final_size} bytes)"
-                            log_info "  - Stored in: $persistent_file"
-                            log_info "  - Copied to: /config/cups/ppds/$filename"
-                            
-                            # Verify both files exist
-                            if [ -f "$persistent_file" ] && [ -f "/config/cups/ppds/$filename" ]; then
-                                log_info "  - Verification: Both files exist ✓"
-                            else
-                                log_warn "  - Verification: File missing in one location!"
-                            fi
-                        else
-                            log_warn "Downloaded PPD but failed to copy to /config: $filename"
-                        fi
+                        log_info "Successfully downloaded and validated: $filename (${final_size} bytes)"
+                        log_info "  - Stored in: $persistent_file"
+                        log_info "  - Accessible via symlink at: /config/cups/ppds/$filename"
                         download_count=$((download_count + 1))
                     else
                         log_error "Failed to move validated PPD file: $filename"
@@ -538,94 +524,49 @@ else
     fi
 fi
 
-# Sync ALL PPD files from /data to /config for visibility (regardless of download status)
-# This ensures all PPDs (preinstalled and downloaded) are visible in addon_config
-log_info "Syncing all PPD files to /config/cups/ppds for addon_config visibility..."
+# Create symlink from /config/cups/ppds to /data/cups/ppds for visibility
+# This ensures all PPDs are visible in addon_config via symlink
+log_info "Creating symlink for PPD directory visibility..."
 if [ -d /data/cups/ppds ]; then
-    synced_count=0
-    skipped_count=0
-    error_count=0
+    # Remove existing directory if it's not a symlink
+    if [ -d /config/cups/ppds ] && [ ! -L /config/cups/ppds ]; then
+        rm -rf /config/cups/ppds
+        log_info "Removed existing /config/cups/ppds directory (will create symlink instead)"
+    fi
     
-    # Count PPD files in /data
-    ppd_count_data=$(find /data/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
-    log_info "Found $ppd_count_data PPD file(s) in /data/cups/ppds"
+    # Create symlink
+    if [ ! -L /config/cups/ppds ]; then
+        if ln -sf /data/cups/ppds /config/cups/ppds 2>/dev/null; then
+            log_info "Created symlink: /config/cups/ppds -> /data/cups/ppds"
+        else
+            log_warn "Failed to create symlink for PPD directory"
+        fi
+    else
+        log_info "PPD directory symlink already exists: /config/cups/ppds -> /data/cups/ppds"
+    fi
     
-    if [ "$ppd_count_data" -gt 0 ]; then
-        for ppd_file in /data/cups/ppds/*.ppd; do
-            if [ -f "$ppd_file" ]; then
-                ppd_name=$(basename "$ppd_file")
-                # Skip metadata file
-                if [ "$ppd_name" = ".ppd_metadata" ]; then
-                    continue
-                fi
-                
-                file_size=$(stat -c%s "$ppd_file" 2>/dev/null || echo "0")
-                
-                # Copy if doesn't exist or is newer
-                if [ ! -f "/config/cups/ppds/$ppd_name" ] || [ "$ppd_file" -nt "/config/cups/ppds/$ppd_name" ]; then
-                    if cp "$ppd_file" "/config/cups/ppds/$ppd_name" 2>/dev/null; then
-                        synced_count=$((synced_count + 1))
-                        log_info "Synced PPD to /config: $ppd_name (${file_size} bytes)"
-                        
-                        # Verify the copy
-                        if [ -f "/config/cups/ppds/$ppd_name" ]; then
-                            config_size=$(stat -c%s "/config/cups/ppds/$ppd_name" 2>/dev/null || echo "0")
-                            if [ "$file_size" = "$config_size" ]; then
-                                if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
-                                    log_info "DEBUG: Verified copy - sizes match ($file_size bytes)"
-                                fi
-                            else
-                                log_warn "Size mismatch after copy: $file_size vs $config_size"
-                            fi
-                        else
-                            log_error "Copy failed - file not found in /config after copy attempt"
-                            error_count=$((error_count + 1))
-                        fi
-                    else
-                        log_warn "Failed to sync PPD to /config: $ppd_name"
-                        error_count=$((error_count + 1))
-                    fi
-                else
-                    skipped_count=$((skipped_count + 1))
-                    if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
-                        log_info "DEBUG: Skipped (already up-to-date): $ppd_name"
-                    fi
+    # Count and list PPD files
+    ppd_count=$(find /data/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+    log_info "Found $ppd_count PPD file(s) in /data/cups/ppds (accessible via /config/cups/ppds symlink)"
+    
+    if [ "$ppd_count" -gt 0 ]; then
+        log_info "PPD files available:"
+        for ppd in /data/cups/ppds/*.ppd; do
+            if [ -f "$ppd" ]; then
+                ppd_name=$(basename "$ppd")
+                if [ "$ppd_name" != ".ppd_metadata" ]; then
+                    size=$(stat -c%s "$ppd" 2>/dev/null || echo "0")
+                    log_info "  ✓ $ppd_name (${size} bytes)"
                 fi
             fi
         done
-        
-        # Final verification
-        ppd_count_config=$(find /config/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
-        log_info "PPD sync completed: $synced_count synced, $skipped_count already up-to-date, $error_count errors"
-        log_info "PPD file counts: $ppd_count_data in /data, $ppd_count_config in /config"
-        
-        if [ "$ppd_count_data" -ne "$ppd_count_config" ]; then
-            log_warn "PPD count mismatch: /data has $ppd_count_data, /config has $ppd_count_config"
-        fi
-        
-        # List all PPDs in both locations if debug mode
-        if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
-            log_info "DEBUG: PPD files in /data/cups/ppds:"
-            ls -lh /data/cups/ppds/*.ppd 2>/dev/null | while read -r line; do
-                log_info "DEBUG:   $line"
-            done
-            log_info "DEBUG: PPD files in /config/cups/ppds:"
-            ls -lh /config/cups/ppds/*.ppd 2>/dev/null | while read -r line; do
-                log_info "DEBUG:   $line"
-            done
-        fi
-    else
-        log_info "No PPD files found in /data/cups/ppds to sync"
     fi
     
-    # List files in /config/cups/ppds to verify visibility
-    log_info "PPD files in /config/cups/ppds (visible in addon_config):"
-    if [ -d /config/cups/ppds ] && ls /config/cups/ppds/*.ppd 1>/dev/null 2>&1; then
-        ls -lh /config/cups/ppds/*.ppd 2>/dev/null | while read -r line; do
-            log_info "  $line"
-        done || log_warn "Could not list PPD files in /config/cups/ppds"
+    # Verify symlink works
+    if [ -L /config/cups/ppds ] && [ -d /config/cups/ppds ]; then
+        log_info "PPD directory symlink verified - files accessible at /addon_configs/{REPO}_extended_cups/cups/ppds/"
     else
-        log_warn "No PPD files found in /config/cups/ppds"
+        log_warn "PPD directory symlink may not be working correctly"
     fi
 else
     log_warn "/data/cups/ppds directory does not exist"
@@ -752,7 +693,7 @@ log_info "  - USB printers: Auto-detected via USB backend"
 log_info "  - Network printers: Auto-discovered via mDNS/Bonjour (Avahi)"
 log_info "  - Printer configurations: Persisted in /data/cups/config (visible via /config/cups/config)"
 log_info "  - PPD files: Persisted in /data/cups/ppds (visible via /config/cups/ppds)"
-log_info "  - Configuration sync: Automatic sync service will keep /config files up-to-date"
+log_info "  - Configuration files: Linked via symlinks (always up-to-date automatically)"
 if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
     log_info "  - Debug mode: ENABLED - Check logs for detailed information"
 fi
