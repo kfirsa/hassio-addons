@@ -172,18 +172,23 @@ fi
 
 # Initialize printers.conf in persistent location if it doesn't exist
 # This ensures printer configurations persist across restarts and upgrades
-log_info "Initializing printers configuration file..."
+log_info "Initializing printers configuration file in persistent storage..."
 if [ ! -f /data/cups/config/printers.conf ]; then
-    touch /data/cups/config/printers.conf
-    chown root:lp /data/cups/config/printers.conf
-    chmod 640 /data/cups/config/printers.conf
-    log_info "Created new printers.conf in persistent location"
+    if touch /data/cups/config/printers.conf && chown root:lp /data/cups/config/printers.conf && chmod 640 /data/cups/config/printers.conf; then
+        log_info "Created new printers.conf in persistent location: /data/cups/config/printers.conf"
+        log_info "  (Host path: /config/addon_configs/extended_cups/cups/config/printers.conf)"
+    else
+        log_error "Failed to create printers.conf in persistent location"
+        exit 1
+    fi
 else
     log_info "Existing printers.conf found in persistent location"
     # Show file size to verify it has content
     file_size=$(stat -c%s /data/cups/config/printers.conf 2>/dev/null || echo "0")
     if [ "$file_size" -gt 0 ]; then
         log_info "Printers configuration file contains data ($file_size bytes)"
+        log_info "  File location: /data/cups/config/printers.conf"
+        log_info "  Host path: /config/addon_configs/extended_cups/cups/config/printers.conf"
     else
         log_info "Printers configuration file is empty (no printers configured yet)"
     fi
