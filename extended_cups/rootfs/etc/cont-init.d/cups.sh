@@ -453,6 +453,29 @@ validate_ppd() {
 # Download additional PPD files from OpenPrinting if configured
 # Home Assistant passes list options as JSON arrays in environment variables
 # PPDs are stored in persistent location and only downloaded if missing or URL changed
+
+# First, ensure /config/cups/ppds directory exists and check for existing PPDs
+if [ ! -d /config/cups/ppds ]; then
+    mkdir -p /config/cups/ppds
+    log_info "Created /config/cups/ppds directory"
+fi
+
+# Count existing PPDs before processing
+existing_ppd_count=$(find /config/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+if [ "$existing_ppd_count" -gt 0 ]; then
+    log_info "Found $existing_ppd_count existing PPD file(s) in /config/cups/ppds (will be preserved)"
+    log_debug "Existing PPD files:"
+    for ppd in /config/cups/ppds/*.ppd; do
+        if [ -f "$ppd" ]; then
+            ppd_name=$(basename "$ppd")
+            if [ "$ppd_name" != ".ppd_metadata" ]; then
+                size=$(stat -c%s "$ppd" 2>/dev/null || echo "0")
+                log_debug "  - $ppd_name (${size} bytes)"
+            fi
+        fi
+    done
+fi
+
 PPD_URLS_ENV="${PPD_URLS:-[]}"
 if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
     log_info "PPD URLs configured, checking for downloads/updates..."
