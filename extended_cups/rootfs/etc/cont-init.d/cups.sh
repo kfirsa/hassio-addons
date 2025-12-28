@@ -442,12 +442,74 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
     
     log_info "PPD download process completed: $download_count downloaded, $update_count updated, $skip_count skipped, $error_count errors"
 else
-    log_info "No additional PPD URLs configured, skipping download"
-    # Still create symlink for preinstalled PPDs
+    log_info "No additional PPD URLs configured, checking for preinstalled PPDs..."
+    # Migrate preinstalled PPDs even if no URLs are configured
+    if [ -d /usr/share/cups/model/openprinting ] && [ ! -L /usr/share/cups/model/openprinting ]; then
+        if [ "$(ls -A /usr/share/cups/model/openprinting 2>/dev/null)" ]; then
+            log_info "Migrating preinstalled PPDs from image to persistent location..."
+            mkdir -p /data/cups/ppds
+            for ppd_file in /usr/share/cups/model/openprinting/*.ppd; do
+                if [ -f "$ppd_file" ]; then
+                    ppd_name=$(basename "$ppd_file")
+                    if [ ! -f "/data/cups/ppds/$ppd_name" ]; then
+                        cp "$ppd_file" "/data/cups/ppds/$ppd_name"
+                        log_info "Migrated preinstalled PPD: $ppd_name"
+                    fi
+                fi
+            done
+        fi
+        rm -rf /usr/share/cups/model/openprinting
+    fi
+    # Create symlink for preinstalled PPDs
     if [ ! -L /usr/share/cups/model/openprinting ]; then
         mkdir -p /data/cups/ppds
         ln -sf /data/cups/ppds /usr/share/cups/model/openprinting
     fi
+fi
+
+# Sync ALL PPD files from /data to /config for visibility (regardless of download status)
+# This ensures all PPDs (preinstalled and downloaded) are visible in addon_config
+log_info "Syncing all PPD files to /config/cups/ppds for addon_config visibility..."
+if [ -d /data/cups/ppds ]; then
+    synced_count=0
+    skipped_count=0
+    if ls /data/cups/ppds/*.ppd 1>/dev/null 2>&1; then
+        for ppd_file in /data/cups/ppds/*.ppd; do
+            if [ -f "$ppd_file" ]; then
+                ppd_name=$(basename "$ppd_file")
+                # Skip metadata file
+                if [ "$ppd_name" = ".ppd_metadata" ]; then
+                    continue
+                fi
+                # Copy if doesn't exist or is newer
+                if [ ! -f "/config/cups/ppds/$ppd_name" ] || [ "$ppd_file" -nt "/config/cups/ppds/$ppd_name" ]; then
+                    if cp "$ppd_file" "/config/cups/ppds/$ppd_name" 2>/dev/null; then
+                        synced_count=$((synced_count + 1))
+                        log_info "Synced PPD to /config: $ppd_name"
+                    else
+                        log_warn "Failed to sync PPD to /config: $ppd_name"
+                    fi
+                else
+                    skipped_count=$((skipped_count + 1))
+                fi
+            fi
+        done
+        log_info "PPD sync completed: $synced_count synced, $skipped_count already up-to-date"
+    else
+        log_info "No PPD files found in /data/cups/ppds to sync"
+    fi
+    
+    # List files in /config/cups/ppds to verify visibility
+    log_info "PPD files in /config/cups/ppds (visible in addon_config):"
+    if [ -d /config/cups/ppds ] && ls /config/cups/ppds/*.ppd 1>/dev/null 2>&1; then
+        ls -lh /config/cups/ppds/*.ppd 2>/dev/null | while read -r line; do
+            log_info "  $line"
+        done || log_warn "Could not list PPD files in /config/cups/ppds"
+    else
+        log_warn "No PPD files found in /config/cups/ppds"
+    fi
+else
+    log_warn "/data/cups/ppds directory does not exist"
 fi
 
 # Ensure USB devices are accessible
