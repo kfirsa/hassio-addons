@@ -17,7 +17,6 @@ map:
   - data:rw
   - share:rw
   - addon_config:rw
-  - ssl:ro
 init: false
 ports:
   631/tcp: 631

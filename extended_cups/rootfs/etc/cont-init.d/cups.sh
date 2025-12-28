@@ -23,7 +23,7 @@ log_info "Starting Extended CUPS Print Server initialization..."
 
 # Current addon version (from config.yaml)
 # NOTE: Update this version number when bumping version in config.yaml
-CURRENT_VERSION="1.5.6"
+CURRENT_VERSION="1.5.7"
 VERSION_FILE="/config/.addon_version"
 
 # Check if debug mode is enabled

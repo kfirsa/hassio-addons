@@ -58,6 +58,7 @@ log_info "CUPS web interface will be available at: http://<your-ip>:631"
 log_info "IMPORTANT: Use HTTP (not HTTPS) - CUPS does not use SSL by default"
 
 # Start CUPS daemon in foreground (s6 will manage it)
-# Use -f to run in foreground and -l for logging to stderr
-exec /usr/sbin/cupsd -f -l error
+# Use -f to run in foreground mode
+# Logging is handled by CUPS and written to /data/cups/logs
+exec /usr/sbin/cupsd -f
 
