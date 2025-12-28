@@ -22,23 +22,59 @@ if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
     log_info "DEBUG MODE ENABLED - Verbose logging activated"
 fi
 
-# Create CUPS data directories for persistence
-# /data is the standard persistent storage volume in Home Assistant addons
-# addon_config:rw maps to /config in container and /addon_configs/{REPO}_{slug} on host
-log_info "Creating CUPS data directories in persistent storage..."
-if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config /data/cups/ppds; then
-    log_info "CUPS data directories created successfully in /data/cups"
-    
-    # Also create directories in /config for addon_config mapping (user-accessible)
-    # This makes files visible in /addon_configs/{REPO}_extended_cups on the host
-    # Note: We create actual directories (not symlinks) because symlinks may not
-    # work properly across the addon_config mount boundary
-    if mkdir -p /config/cups/config /config/cups/ppds; then
-        log_info "Created directories in /config for addon_config mapping"
-        log_info "Files in /config will be visible at /addon_configs/{REPO}_extended_cups/ on host"
-    else
-        log_warn "Failed to create directories in /config"
+# Create CUPS data directories
+# Original files will be in /config (addon_config, visible on host)
+# /data will contain symlinks pointing to /config
+log_info "Creating CUPS data directories..."
+# Create /data directories for logs, cache, state (these stay in /data)
+if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state; then
+    log_info "CUPS data directories created in /data/cups (cache, logs, state)"
+else
+    log_error "Failed to create CUPS data directories in /data"
+    exit 1
+fi
+
+# Create /config directories for configuration files (visible on host via addon_config)
+# These will contain the original files
+if mkdir -p /config/cups/config /config/cups/ppds; then
+    log_info "Created directories in /config for addon_config mapping"
+    log_info "Files in /config will be visible at /addon_configs/{REPO}_extended_cups/ on host"
+else
+    log_error "Failed to create directories in /config"
+    exit 1
+fi
+
+# Migrate any existing files from /data/cups/config to /config/cups/config
+if [ -d /data/cups/config ] && [ "$(ls -A /data/cups/config 2>/dev/null)" ]; then
+    log_info "Migrating existing files from /data/cups/config to /config/cups/config..."
+    for file in /data/cups/config/*; do
+        if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            if [ ! -f "/config/cups/config/$filename" ]; then
+                cp "$file" "/config/cups/config/$filename" 2>/dev/null && \
+                log_info "Migrated $filename to /config/cups/config"
+            fi
+        fi
+    done
+fi
+
+# Migrate any existing PPD files from /data/cups/ppds to /config/cups/ppds
+if [ -d /data/cups/ppds ] && [ "$(ls -A /data/cups/ppds 2>/dev/null)" ]; then
+    log_info "Migrating existing PPD files from /data/cups/ppds to /config/cups/ppds..."
+    for file in /data/cups/ppds/*.ppd; do
+        if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            if [ "$filename" != ".ppd_metadata" ] && [ ! -f "/config/cups/ppds/$filename" ]; then
+                cp "$file" "/config/cups/ppds/$filename" 2>/dev/null && \
+                log_info "Migrated PPD $filename to /config/cups/ppds"
+            fi
+        fi
+    done
+    # Also migrate metadata file if it exists
+    if [ -f /data/cups/ppds/.ppd_metadata ]; then
+        cp /data/cups/ppds/.ppd_metadata /config/cups/ppds/.ppd_metadata 2>/dev/null || true
     fi
+fi
     
     # Verify directories exist and show their locations
     log_info "Persistent storage locations:"
@@ -79,20 +115,20 @@ else
     log_warn "Some permission operations may have failed"
 fi
 
-# Make /etc/cups a symlink to persistent location
-# This ensures ALL CUPS writes go directly to persistent storage
+# Make /etc/cups a symlink to /config/cups/config
+# Original files are in /config (visible on host), /etc/cups points to them
 log_info "Setting up CUPS configuration directory..."
 if [ -d /etc/cups ] && [ ! -L /etc/cups ]; then
-    # If /etc/cups exists as a directory, move any existing files to persistent location
-    log_info "Migrating existing /etc/cups files to persistent location..."
+    # If /etc/cups exists as a directory, migrate files to /config
+    log_info "Migrating existing /etc/cups files to /config/cups/config..."
     if [ -f /etc/cups/printers.conf ]; then
-        cp /etc/cups/printers.conf /data/cups/config/printers.conf 2>/dev/null || true
-        log_info "Migrated printers.conf to persistent location"
+        cp /etc/cups/printers.conf /config/cups/config/printers.conf 2>/dev/null || true
+        log_info "Migrated printers.conf to /config/cups/config"
     fi
     if [ -f /etc/cups/cupsd.conf ]; then
-        # Only copy if our persistent one doesn't exist
-        if [ ! -f /data/cups/config/cupsd.conf ]; then
-            cp /etc/cups/cupsd.conf /data/cups/config/cupsd.conf 2>/dev/null || true
+        if [ ! -f /config/cups/config/cupsd.conf ]; then
+            cp /etc/cups/cupsd.conf /config/cups/config/cupsd.conf 2>/dev/null || true
+            log_info "Migrated cupsd.conf to /config/cups/config"
         fi
     fi
     # Remove the directory
@@ -100,27 +136,38 @@ if [ -d /etc/cups ] && [ ! -L /etc/cups ]; then
     log_info "Removed /etc/cups directory for symlink creation"
 fi
 
-# Create symlink from /etc/cups to persistent location
-# This ensures CUPS writes directly to persistent storage
+# Create symlink from /etc/cups to /config/cups/config
+# This ensures CUPS writes directly to /config (visible on host)
 if [ ! -L /etc/cups ]; then
-    ln -sf /data/cups/config /etc/cups
-    log_info "Created /etc/cups symlink to persistent location"
+    ln -sf /config/cups/config /etc/cups
+    log_info "Created /etc/cups symlink to /config/cups/config (original files in addon_config)"
 else
     # Verify the symlink points to the correct location
     current_link=$(readlink /etc/cups)
-    if [ "$current_link" != "/data/cups/config" ]; then
+    if [ "$current_link" != "/config/cups/config" ]; then
         log_warn "Existing /etc/cups symlink points to $current_link, recreating..."
         rm -f /etc/cups
-        ln -sf /data/cups/config /etc/cups
-        log_info "Recreated /etc/cups symlink to persistent location"
+        ln -sf /config/cups/config /etc/cups
+        log_info "Recreated /etc/cups symlink to /config/cups/config"
     else
-        log_info "/etc/cups symlink already points to persistent location"
+        log_info "/etc/cups symlink already points to /config/cups/config"
     fi
+fi
+
+# Also create /data/cups/config as a symlink to /config/cups/config for consistency
+# This allows any scripts expecting /data/cups/config to still work
+if [ -d /data/cups/config ] && [ ! -L /data/cups/config ]; then
+    # If it's a directory, remove it first
+    rm -rf /data/cups/config
+fi
+if [ ! -L /data/cups/config ]; then
+    ln -sf /config/cups/config /data/cups/config
+    log_info "Created /data/cups/config symlink to /config/cups/config"
 fi
 
 # Verify the symlink works
 if [ -L /etc/cups ] && [ -d /etc/cups ]; then
-    log_info "CUPS configuration directory symlink verified"
+    log_info "CUPS configuration directory symlink verified: /etc/cups -> /config/cups/config"
 else
     log_error "Failed to create /etc/cups symlink"
     exit 1
@@ -128,12 +175,12 @@ fi
 
 # Basic CUPS configuration without admin authentication
 # Note: We don't set ServerRoot here - CUPS will use default /etc/cups
-# Since /etc/cups is a symlink to /data/cups/config, all writes persist automatically
+# Since /etc/cups is a symlink to /config/cups/config, all writes go to addon_config (visible on host)
 log_info "Generating CUPS configuration file..."
-cat > /data/cups/config/cupsd.conf << EOL
+cat > /config/cups/config/cupsd.conf << EOL
 # Note: ServerRoot defaults to /etc/cups
-# Since /etc/cups is symlinked to /data/cups/config (persistent storage),
-# all CUPS configuration files will automatically persist across restarts
+# Since /etc/cups is symlinked to /config/cups/config (addon_config),
+# all CUPS configuration files will be visible on host and persist across restarts
 
 # Listen on all interfaces and port
 # Note: With host_network: true, CUPS listens directly on the host network
@@ -198,55 +245,34 @@ JobSheets none,none
 PreserveJobHistory No
 EOL
 
-if [ -f /data/cups/config/cupsd.conf ]; then
-    log_info "CUPS configuration file created successfully at /data/cups/config/cupsd.conf"
-    # Create symlink in /config so it's visible in addon_config directory
-    if [ -f /config/cups/config/cupsd.conf ] && [ ! -L /config/cups/config/cupsd.conf ]; then
-        rm -f /config/cups/config/cupsd.conf
-    fi
-    if ln -sf /data/cups/config/cupsd.conf /config/cups/config/cupsd.conf 2>/dev/null; then
-        log_info "Created symlink: /config/cups/config/cupsd.conf -> /data/cups/config/cupsd.conf"
-    else
-        log_warn "Failed to create symlink for cupsd.conf (files may not be visible in addon_config)"
-    fi
+if [ -f /config/cups/config/cupsd.conf ]; then
+    log_info "CUPS configuration file created successfully at /config/cups/config/cupsd.conf"
+    log_info "  (Original file in addon_config, visible on host)"
 else
     log_error "Failed to create CUPS configuration file"
     exit 1
 fi
 
-# Initialize printers.conf in persistent location if it doesn't exist
-# This ensures printer configurations persist across restarts and upgrades
-log_info "Initializing printers configuration file in persistent storage..."
-if [ ! -f /data/cups/config/printers.conf ]; then
-    if touch /data/cups/config/printers.conf && chown root:lp /data/cups/config/printers.conf && chmod 640 /data/cups/config/printers.conf; then
-        log_info "Created new printers.conf in persistent location: /data/cups/config/printers.conf"
+# Initialize printers.conf in /config if it doesn't exist
+# Original file is in /config (visible on host via addon_config)
+log_info "Initializing printers configuration file..."
+if [ ! -f /config/cups/config/printers.conf ]; then
+    if touch /config/cups/config/printers.conf && chown root:lp /config/cups/config/printers.conf && chmod 640 /config/cups/config/printers.conf; then
+        log_info "Created new printers.conf in /config/cups/config (original file in addon_config)"
+        log_info "  (Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf)"
     else
-        log_error "Failed to create printers.conf in persistent location"
+        log_error "Failed to create printers.conf in /config/cups/config"
         exit 1
     fi
 else
-    log_info "Existing printers.conf found in persistent location"
+    log_info "Existing printers.conf found in /config/cups/config"
     # Show file size to verify it has content
-    file_size=$(stat -c%s /data/cups/config/printers.conf 2>/dev/null || echo "0")
+    file_size=$(stat -c%s /config/cups/config/printers.conf 2>/dev/null || echo "0")
     if [ "$file_size" -gt 0 ]; then
         log_info "Printers configuration file contains data ($file_size bytes)"
     else
         log_info "Printers configuration file is empty (no printers configured yet)"
     fi
-fi
-
-# Create symlink from /config to /data for printers.conf
-# Remove existing file if it's not a symlink
-if [ -f /config/cups/config/printers.conf ] && [ ! -L /config/cups/config/printers.conf ]; then
-    rm -f /config/cups/config/printers.conf
-    log_info "Removed existing printers.conf file (will create symlink instead)"
-fi
-# Create symlink
-if ln -sf /data/cups/config/printers.conf /config/cups/config/printers.conf 2>/dev/null; then
-    log_info "Created symlink: /config/cups/config/printers.conf -> /data/cups/config/printers.conf"
-    log_info "  (Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf)"
-else
-    log_warn "Failed to create symlink for printers.conf"
 fi
 
 # Create a README file in /config/cups/config to help users understand the directory structure
@@ -344,24 +370,28 @@ PPD_URLS_ENV="${PPD_URLS:-[]}"
 if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
     log_info "PPD URLs configured, checking for downloads/updates..."
     
-    # Create persistent directory for downloaded PPDs
-    if mkdir -p /data/cups/ppds; then
-        log_info "Persistent PPD directory ready"
-    else
-        log_error "Failed to create persistent PPD directory"
+    # Original PPD files are in /config/cups/ppds (visible on host)
+    # Create symlink from /data/cups/ppds to /config/cups/ppds
+    if [ -d /data/cups/ppds ] && [ ! -L /data/cups/ppds ]; then
+        # If /data/cups/ppds is a directory, remove it (files already migrated earlier)
+        rm -rf /data/cups/ppds
+    fi
+    if [ ! -L /data/cups/ppds ]; then
+        ln -sf /config/cups/ppds /data/cups/ppds
+        log_info "Created /data/cups/ppds symlink to /config/cups/ppds"
     fi
     
-    # Create symlink from CUPS model directory to persistent location
-    # First, migrate any preinstalled PPDs from Docker image to persistent location
+    # Create symlink from CUPS model directory to /config/cups/ppds
+    # First, migrate any preinstalled PPDs from Docker image to /config
     if [ -d /usr/share/cups/model/openprinting ] && [ ! -L /usr/share/cups/model/openprinting ]; then
         if [ "$(ls -A /usr/share/cups/model/openprinting 2>/dev/null)" ]; then
-            log_info "Migrating preinstalled PPDs from image to persistent location..."
+            log_info "Migrating preinstalled PPDs from image to /config/cups/ppds..."
             for ppd_file in /usr/share/cups/model/openprinting/*.ppd; do
                 if [ -f "$ppd_file" ]; then
                     ppd_name=$(basename "$ppd_file")
-                    if [ ! -f "/data/cups/ppds/$ppd_name" ]; then
-                        cp "$ppd_file" "/data/cups/ppds/$ppd_name"
-                        log_info "Migrated preinstalled PPD: $ppd_name"
+                    if [ ! -f "/config/cups/ppds/$ppd_name" ]; then
+                        cp "$ppd_file" "/config/cups/ppds/$ppd_name"
+                        log_info "Migrated preinstalled PPD: $ppd_name to /config/cups/ppds"
                     fi
                 fi
             done
@@ -370,8 +400,8 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
     fi
     
     if [ ! -L /usr/share/cups/model/openprinting ]; then
-        ln -sf /data/cups/ppds /usr/share/cups/model/openprinting
-        log_info "Created symlink from /usr/share/cups/model/openprinting to persistent location"
+        ln -sf /config/cups/ppds /usr/share/cups/model/openprinting
+        log_info "Created symlink from /usr/share/cups/model/openprinting to /config/cups/ppds"
     fi
     
     download_count=0
@@ -379,8 +409,8 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
     error_count=0
     update_count=0
     
-    # Create metadata file to track downloads
-    metadata_file="/data/cups/ppds/.ppd_metadata"
+    # Create metadata file to track downloads (in /config, original location)
+    metadata_file="/config/cups/ppds/.ppd_metadata"
     touch "$metadata_file"
     
     # Parse PPD URLs from JSON array format
@@ -405,7 +435,7 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
             if [ "${filename##*.}" != "ppd" ]; then
                 filename="${filename}.ppd"
             fi
-            persistent_file="/data/cups/ppds/$filename"
+            persistent_file="/config/cups/ppds/$filename"
             temp_file="/tmp/${filename}.$$"
             
             if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
@@ -463,8 +493,8 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                         mv "${metadata_file}.tmp" "$metadata_file"
                         
                         log_info "Successfully downloaded and validated: $filename (${final_size} bytes)"
-                        log_info "  - Stored in: $persistent_file"
-                        log_info "  - Accessible via symlink at: /config/cups/ppds/$filename"
+                        log_info "  - Stored in: $persistent_file (original file in addon_config)"
+                        log_info "  - Host path: /addon_configs/{REPO}_extended_cups/cups/ppds/$filename"
                         download_count=$((download_count + 1))
                     else
                         log_error "Failed to move validated PPD file: $filename"
@@ -503,14 +533,13 @@ else
     # Migrate preinstalled PPDs even if no URLs are configured
     if [ -d /usr/share/cups/model/openprinting ] && [ ! -L /usr/share/cups/model/openprinting ]; then
         if [ "$(ls -A /usr/share/cups/model/openprinting 2>/dev/null)" ]; then
-            log_info "Migrating preinstalled PPDs from image to persistent location..."
-            mkdir -p /data/cups/ppds
+            log_info "Migrating preinstalled PPDs from image to /config/cups/ppds..."
             for ppd_file in /usr/share/cups/model/openprinting/*.ppd; do
                 if [ -f "$ppd_file" ]; then
                     ppd_name=$(basename "$ppd_file")
-                    if [ ! -f "/data/cups/ppds/$ppd_name" ]; then
-                        cp "$ppd_file" "/data/cups/ppds/$ppd_name"
-                        log_info "Migrated preinstalled PPD: $ppd_name"
+                    if [ ! -f "/config/cups/ppds/$ppd_name" ]; then
+                        cp "$ppd_file" "/config/cups/ppds/$ppd_name"
+                        log_info "Migrated preinstalled PPD: $ppd_name to /config/cups/ppds"
                     fi
                 fi
             done
@@ -519,39 +548,30 @@ else
     fi
     # Create symlink for preinstalled PPDs
     if [ ! -L /usr/share/cups/model/openprinting ]; then
-        mkdir -p /data/cups/ppds
-        ln -sf /data/cups/ppds /usr/share/cups/model/openprinting
+        ln -sf /config/cups/ppds /usr/share/cups/model/openprinting
+        log_info "Created symlink from /usr/share/cups/model/openprinting to /config/cups/ppds"
+    fi
+    
+    # Also create /data/cups/ppds symlink to /config/cups/ppds
+    if [ -d /data/cups/ppds ] && [ ! -L /data/cups/ppds ]; then
+        rm -rf /data/cups/ppds
+    fi
+    if [ ! -L /data/cups/ppds ]; then
+        ln -sf /config/cups/ppds /data/cups/ppds
+        log_info "Created /data/cups/ppds symlink to /config/cups/ppds"
     fi
 fi
 
-# Create symlink from /config/cups/ppds to /data/cups/ppds for visibility
-# This ensures all PPDs are visible in addon_config via symlink
-log_info "Creating symlink for PPD directory visibility..."
-if [ -d /data/cups/ppds ]; then
-    # Remove existing directory if it's not a symlink
-    if [ -d /config/cups/ppds ] && [ ! -L /config/cups/ppds ]; then
-        rm -rf /config/cups/ppds
-        log_info "Removed existing /config/cups/ppds directory (will create symlink instead)"
-    fi
-    
-    # Create symlink
-    if [ ! -L /config/cups/ppds ]; then
-        if ln -sf /data/cups/ppds /config/cups/ppds 2>/dev/null; then
-            log_info "Created symlink: /config/cups/ppds -> /data/cups/ppds"
-        else
-            log_warn "Failed to create symlink for PPD directory"
-        fi
-    else
-        log_info "PPD directory symlink already exists: /config/cups/ppds -> /data/cups/ppds"
-    fi
-    
-    # Count and list PPD files
-    ppd_count=$(find /data/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
-    log_info "Found $ppd_count PPD file(s) in /data/cups/ppds (accessible via /config/cups/ppds symlink)"
+# Verify PPD directory setup
+log_info "Verifying PPD directory setup..."
+if [ -d /config/cups/ppds ]; then
+    # Count and list PPD files (original files in /config)
+    ppd_count=$(find /config/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+    log_info "Found $ppd_count PPD file(s) in /config/cups/ppds (original files in addon_config)"
     
     if [ "$ppd_count" -gt 0 ]; then
         log_info "PPD files available:"
-        for ppd in /data/cups/ppds/*.ppd; do
+        for ppd in /config/cups/ppds/*.ppd; do
             if [ -f "$ppd" ]; then
                 ppd_name=$(basename "$ppd")
                 if [ "$ppd_name" != ".ppd_metadata" ]; then
@@ -562,14 +582,16 @@ if [ -d /data/cups/ppds ]; then
         done
     fi
     
-    # Verify symlink works
-    if [ -L /config/cups/ppds ] && [ -d /config/cups/ppds ]; then
-        log_info "PPD directory symlink verified - files accessible at /addon_configs/{REPO}_extended_cups/cups/ppds/"
-    else
-        log_warn "PPD directory symlink may not be working correctly"
+    # Verify symlinks work
+    if [ -L /data/cups/ppds ] && [ -d /data/cups/ppds ]; then
+        log_info "PPD directory symlink verified: /data/cups/ppds -> $(readlink /data/cups/ppds)"
     fi
+    if [ -L /usr/share/cups/model/openprinting ] && [ -d /usr/share/cups/model/openprinting ]; then
+        log_info "CUPS model directory symlink verified: /usr/share/cups/model/openprinting -> $(readlink /usr/share/cups/model/openprinting)"
+    fi
+    log_info "PPD files accessible on host at: /addon_configs/{REPO}_extended_cups/cups/ppds/"
 else
-    log_warn "/data/cups/ppds directory does not exist"
+    log_warn "/config/cups/ppds directory does not exist"
 fi
 
 # Ensure USB devices are accessible
@@ -630,10 +652,10 @@ fi
 if [ -x /usr/sbin/cupsd ]; then
     log_info "CUPS daemon found, starting service..."
     # Verify /etc/cups symlink is correct (CUPS will use default /etc/cups location)
-    if [ -L /etc/cups ] && [ "$(readlink /etc/cups)" = "/data/cups/config" ]; then
-        log_info "CUPS will write to /etc/cups (mapped to persistent /data/cups/config)"
+    if [ -L /etc/cups ] && [ "$(readlink /etc/cups)" = "/config/cups/config" ]; then
+        log_info "CUPS will write to /etc/cups (mapped to /config/cups/config, visible on host via addon_config)"
     else
-        log_error "/etc/cups symlink is not correctly configured"
+        log_error "/etc/cups symlink is not correctly configured (expected -> /config/cups/config)"
         exit 1
     fi
 else
@@ -692,7 +714,7 @@ log_info "Automatic printer discovery enabled:"
 log_info "  - USB printers: Auto-detected via USB backend"
 log_info "  - Network printers: Auto-discovered via mDNS/Bonjour (Avahi)"
 log_info "  - Printer configurations: Persisted in /data/cups/config (visible via /config/cups/config)"
-log_info "  - PPD files: Persisted in /data/cups/ppds (visible via /config/cups/ppds)"
+log_info "  - PPD files: Original files in /config/cups/ppds (visible on host via addon_config)"
 log_info "  - Configuration files: Linked via symlinks (always up-to-date automatically)"
 if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
     log_info "  - Debug mode: ENABLED - Check logs for detailed information"

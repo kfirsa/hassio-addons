@@ -15,17 +15,17 @@ log_warn() {
 
 log_info "Starting CUPS daemon..."
 
-# Verify /etc/cups symlink is correct
-if [ ! -L /etc/cups ] || [ "$(readlink /etc/cups)" != "/data/cups/config" ]; then
+# Verify /etc/cups symlink is correct (should point to /config/cups/config)
+if [ ! -L /etc/cups ] || [ "$(readlink /etc/cups)" != "/config/cups/config" ]; then
     log_error "/etc/cups symlink is not correctly configured"
-    log_error "Expected: /etc/cups -> /data/cups/config"
+    log_error "Expected: /etc/cups -> /config/cups/config"
     log_error "Actual: $(readlink -f /etc/cups 2>/dev/null || echo 'not a symlink')"
     exit 1
 fi
 
-# Verify cupsd.conf exists
-if [ ! -f /data/cups/config/cupsd.conf ]; then
-    log_error "CUPS configuration file not found at /data/cups/config/cupsd.conf"
+# Verify cupsd.conf exists (original file in /config)
+if [ ! -f /config/cups/config/cupsd.conf ]; then
+    log_error "CUPS configuration file not found at /config/cups/config/cupsd.conf"
     exit 1
 fi
 
@@ -49,7 +49,7 @@ export CUPS_LOGDIR=/data/cups/logs
 export CUPS_STATEDIR=/data/cups/state
 
 log_info "CUPS configuration:"
-log_info "  - Config: /data/cups/config (symlinked from /etc/cups)"
+log_info "  - Config: /config/cups/config (original files in addon_config, /etc/cups -> /config/cups/config)"
 log_info "  - Logs: /data/cups/logs"
 log_info "  - State: /data/cups/state"
 log_info "  - Cache: /data/cups/cache"
