@@ -23,7 +23,7 @@ log_info "Starting Extended CUPS Print Server initialization..."
 
 # Current addon version (from config.yaml)
 # NOTE: Update this version number when bumping version in config.yaml
-CURRENT_VERSION="1.5.5"
+CURRENT_VERSION="1.5.6"
 VERSION_FILE="/config/.addon_version"
 
 # Check if debug mode is enabled
@@ -107,63 +107,6 @@ fi
 # Save current version
 echo "$CURRENT_VERSION" > "$VERSION_FILE" 2>/dev/null || true
 
-# Function to send Home Assistant notification via Supervisor API
-send_ha_notification() {
-    local title="$1"
-    local message="$2"
-    
-    # Try to send notification via Supervisor API
-    # The Supervisor API socket is available at /run/supervisor
-    if [ -S /run/supervisor/supervisor.sock ]; then
-        # Use Supervisor API to trigger an event that Home Assistant can listen to
-        # We'll use curl to send a POST request to the Supervisor API
-        local event_data=$(cat <<EOF
-{
-    "type": "addon_update",
-    "data": {
-        "addon": "extended_cups",
-        "version": "$CURRENT_VERSION",
-        "title": "$title",
-        "message": "$message"
-    }
-}
-EOF
-)
-        # Try to send via Supervisor API (if available)
-        if command -v curl >/dev/null 2>&1; then
-            # Use the Supervisor API endpoint
-            # Note: This requires proper authentication, which may not be available
-            # Alternative: Write to a file that can be monitored
-            log_debug "Attempting to send HA notification: $title - $message"
-            
-            # Store notification in a file that can be read by Home Assistant
-            mkdir -p /config
-            echo "$(date -Iseconds)|$title|$message" >> /config/.addon_notifications 2>/dev/null || true
-        fi
-    fi
-    
-    # Also log the update
-    log_info "$title: $message"
-}
-
-# Check for addon update
-if [ -f "$VERSION_FILE" ]; then
-    PREVIOUS_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "")
-    if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$CURRENT_VERSION" ]; then
-        log_info "Addon updated from version $PREVIOUS_VERSION to $CURRENT_VERSION"
-        send_ha_notification "Extended CUPS Addon Updated" \
-            "The Extended CUPS Print Server addon has been updated from version $PREVIOUS_VERSION to $CURRENT_VERSION. Please check the changelog for new features and improvements."
-    else
-        log_debug "Addon version unchanged: $CURRENT_VERSION"
-    fi
-else
-    log_debug "First run detected, version: $CURRENT_VERSION"
-    # First run - don't send notification
-fi
-
-# Save current version
-echo "$CURRENT_VERSION" > "$VERSION_FILE" 2>/dev/null || true
-
 # Create CUPS data directories
 # Original files will be in /config (addon_config, visible on host)
 # /data will contain symlinks pointing to /config
@@ -217,36 +160,32 @@ if [ -d /data/cups/ppds ] && [ "$(ls -A /data/cups/ppds 2>/dev/null)" ]; then
         cp /data/cups/ppds/.ppd_metadata /config/cups/ppds/.ppd_metadata 2>/dev/null || true
     fi
 fi
-    
-    # Verify directories exist and show their locations (debug only)
-    log_debug "Persistent storage locations:"
-    log_debug "  - /data/cups/config (symlink to /config/cups/config)"
-    log_debug "  - /config/cups/config (accessible via /addon_configs/{REPO}_extended_cups/cups/config on host)"
-    log_debug "  - /data/cups/ppds (symlink to /config/cups/ppds)"
-    log_debug "  - /config/cups/ppds (accessible via /addon_configs/{REPO}_extended_cups/cups/ppds on host)"
-    
-    # Create marker files to ensure directories are visible
-    echo "# CUPS Persistent Storage" > /data/cups/.persistent_storage_marker
-    echo "# This directory contains CUPS configuration and data" >> /data/cups/.persistent_storage_marker
-    echo "# Created: $(date)" >> /data/cups/.persistent_storage_marker
-    
-    # Also create marker in /config for addon_config visibility
-    if [ -d /config ]; then
-        mkdir -p /config
-        echo "# CUPS Configuration (accessible via /addon_configs)" > /config/.addon_config_marker 2>/dev/null || true
-        echo "# Created: $(date)" >> /config/.addon_config_marker 2>/dev/null || true
-        log_debug "Created marker file in /config for addon_config visibility"
-    fi
-    
-    # Verify we can write to the persistent location
-    if touch /data/cups/.write_test 2>/dev/null && rm -f /data/cups/.write_test 2>/dev/null; then
-        log_debug "Verified write access to persistent storage"
-    else
-        log_warn "Warning: May not have write access to persistent storage"
-    fi
+
+# Verify directories exist and show their locations (debug only)
+log_debug "Persistent storage locations:"
+log_debug "  - /data/cups/config (symlink to /config/cups/config)"
+log_debug "  - /config/cups/config (accessible via /addon_configs/{REPO}_extended_cups/cups/config on host)"
+log_debug "  - /data/cups/ppds (symlink to /config/cups/ppds)"
+log_debug "  - /config/cups/ppds (accessible via /addon_configs/{REPO}_extended_cups/cups/ppds on host)"
+
+# Create marker files to ensure directories are visible
+echo "# CUPS Persistent Storage" > /data/cups/.persistent_storage_marker
+echo "# This directory contains CUPS configuration and data" >> /data/cups/.persistent_storage_marker
+echo "# Created: $(date)" >> /data/cups/.persistent_storage_marker
+
+# Also create marker in /config for addon_config visibility
+if [ -d /config ]; then
+    mkdir -p /config
+    echo "# CUPS Configuration (accessible via /addon_configs)" > /config/.addon_config_marker 2>/dev/null || true
+    echo "# Created: $(date)" >> /config/.addon_config_marker 2>/dev/null || true
+    log_debug "Created marker file in /config for addon_config visibility"
+fi
+
+# Verify we can write to the persistent location
+if touch /data/cups/.write_test 2>/dev/null && rm -f /data/cups/.write_test 2>/dev/null; then
+    log_debug "Verified write access to persistent storage"
 else
-    log_error "Failed to create CUPS data directories"
-    exit 1
+    log_warn "Warning: May not have write access to persistent storage"
 fi
 
 # Set proper permissions
