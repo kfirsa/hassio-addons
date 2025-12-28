@@ -133,8 +133,10 @@ cat > /data/cups/config/cupsd.conf << EOL
 # Since /etc/cups is symlinked to /data/cups/config (persistent storage),
 # all CUPS configuration files will automatically persist across restarts
 
-# Listen on all interfaces
-Listen 0.0.0.0:631
+# Listen on all interfaces and port
+# Note: With host_network: true, CUPS listens directly on the host network
+Listen *:631
+Port 631
 
 # Allow access from local network
 <Location />
@@ -195,7 +197,16 @@ PreserveJobHistory No
 EOL
 
 if [ -f /data/cups/config/cupsd.conf ]; then
-    log_info "CUPS configuration file created successfully"
+    log_info "CUPS configuration file created successfully at /data/cups/config/cupsd.conf"
+    # Verify it's accessible via /config symlink
+    if [ -f /config/cups/config/cupsd.conf ]; then
+        log_info "CUPS configuration file is accessible via /config/cups/config/cupsd.conf"
+    else
+        log_warn "CUPS configuration file not accessible via /config symlink - checking symlink..."
+        if [ -L /config/cups/config ]; then
+            log_info "Symlink exists: /config/cups/config -> $(readlink /config/cups/config)"
+        fi
+    fi
 else
     log_error "Failed to create CUPS configuration file"
     exit 1
@@ -207,7 +218,7 @@ log_info "Initializing printers configuration file in persistent storage..."
 if [ ! -f /data/cups/config/printers.conf ]; then
     if touch /data/cups/config/printers.conf && chown root:lp /data/cups/config/printers.conf && chmod 640 /data/cups/config/printers.conf; then
         log_info "Created new printers.conf in persistent location: /data/cups/config/printers.conf"
-        log_info "  (Host path: /config/addon_configs/extended_cups/cups/config/printers.conf)"
+        log_info "  (Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf)"
     else
         log_error "Failed to create printers.conf in persistent location"
         exit 1
@@ -219,11 +230,57 @@ else
     if [ "$file_size" -gt 0 ]; then
         log_info "Printers configuration file contains data ($file_size bytes)"
         log_info "  File location: /data/cups/config/printers.conf"
-        log_info "  Host path: /config/addon_configs/extended_cups/cups/config/printers.conf"
+        log_info "  Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf"
     else
         log_info "Printers configuration file is empty (no printers configured yet)"
     fi
 fi
+
+# Create a README file in /config/cups/config to help users understand the directory structure
+# This file will be visible in /addon_configs/{REPO}_extended_cups/cups/config/ on the host
+log_info "Creating README file in /config/cups/config for user reference..."
+cat > /config/cups/config/README.txt << 'READMEEOF'
+CUPS Configuration Directory
+============================
+
+This directory contains CUPS configuration files that persist across addon restarts and upgrades.
+
+Files in this directory:
+- cupsd.conf: Main CUPS daemon configuration
+- printers.conf: Printer definitions (created automatically when printers are added)
+- Other CUPS configuration files as needed
+
+Location:
+- Container path: /data/cups/config (primary storage)
+- Host path: /config/addon_configs/{REPO}_extended_cups/cups/config
+- Accessible via: /config/cups/config (symlink)
+
+Note: Files are stored in /data/cups/config and symlinked to /config/cups/config
+for user accessibility via the addon_config mapping.
+
+To add printers:
+1. Access the CUPS web interface at http://<your-ip>:631
+2. Go to Administration > Add Printer
+3. Select your printer and configure it
+4. The printer configuration will be saved to printers.conf in this directory
+READMEEOF
+if [ -f /config/cups/config/README.txt ]; then
+    log_info "README.txt created successfully in /config/cups/config"
+else
+    log_warn "Failed to create README.txt in /config/cups/config"
+fi
+
+# List files in /data/cups/config to verify they exist
+log_info "Files in /data/cups/config:"
+ls -la /data/cups/config/ 2>/dev/null | while read -r line; do
+    log_info "  $line"
+done || log_warn "Could not list files in /data/cups/config"
+
+# List files in /config/cups/config to verify symlink works
+log_info "Files in /config/cups/config (via symlink):"
+ls -la /config/cups/config/ 2>/dev/null | while read -r line; do
+    log_info "  $line"
+done || log_warn "Could not list files in /config/cups/config"
 
 # Verify /etc/cups symlink is working correctly
 # Since /etc/cups is now a symlink to /data/cups/config, all CUPS writes go to persistent storage
