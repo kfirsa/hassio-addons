@@ -21,12 +21,148 @@ log_error() {
 
 log_info "Starting Extended CUPS Print Server initialization..."
 
+# Current addon version (from config.yaml)
+# NOTE: Update this version number when bumping version in config.yaml
+CURRENT_VERSION="1.5.5"
+VERSION_FILE="/config/.addon_version"
+
 # Check if debug mode is enabled
 DEBUG_MODE="${DEBUG:-false}"
 if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
     set -x  # Enable debug output
     log_info "DEBUG MODE ENABLED - Verbose logging activated"
 fi
+
+# Function to send Home Assistant notification via Supervisor API
+send_ha_notification() {
+    local title="$1"
+    local message="$2"
+    local version="$3"
+    
+    log_info "Addon updated: $title"
+    log_info "  Version: $version"
+    log_info "  Message: $message"
+    
+    # Try to send notification via Supervisor API
+    # The Supervisor API socket is available at /run/supervisor/supervisor.sock
+    if [ -S /run/supervisor/supervisor.sock ] && command -v curl >/dev/null 2>&1; then
+        # Use Supervisor API to trigger an event that Home Assistant can listen to
+        # Supervisor API endpoint: POST /supervisor/api/events
+        local event_payload=$(cat <<EOF
+{
+    "type": "addon_update",
+    "data": {
+        "addon": "extended_cups",
+        "version": "$version",
+        "title": "$title",
+        "message": "$message",
+        "timestamp": "$(date -Iseconds)"
+    }
+}
+EOF
+)
+        # Send event via Supervisor API
+        if curl -s --unix-socket /run/supervisor/supervisor.sock \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "$event_payload" \
+            http://supervisor/api/events >/dev/null 2>&1; then
+            log_info "Update notification sent to Home Assistant via Supervisor API"
+        else
+            log_debug "Failed to send notification via Supervisor API (this is OK if API is not available)"
+        fi
+    fi
+    
+    # Also store notification in a file that can be monitored by Home Assistant
+    # This provides a fallback method for monitoring updates
+    mkdir -p /config
+    local notification_file="/config/.addon_notifications"
+    local notification_entry="$(date -Iseconds)|$title|$message|$version"
+    echo "$notification_entry" >> "$notification_file" 2>/dev/null || true
+    log_debug "Update notification stored in $notification_file"
+}
+
+# Check for addon update
+if [ -f "$VERSION_FILE" ]; then
+    PREVIOUS_VERSION=$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]' || echo "")
+    if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$CURRENT_VERSION" ]; then
+        log_info "========================================="
+        log_info "Addon Update Detected!"
+        log_info "  Previous version: $PREVIOUS_VERSION"
+        log_info "  Current version: $CURRENT_VERSION"
+        log_info "========================================="
+        
+        send_ha_notification \
+            "Extended CUPS Addon Updated" \
+            "The Extended CUPS Print Server addon has been updated from version $PREVIOUS_VERSION to $CURRENT_VERSION. Please check the changelog for new features and improvements." \
+            "$CURRENT_VERSION"
+    else
+        log_debug "Addon version unchanged: $CURRENT_VERSION"
+    fi
+else
+    log_debug "First run detected, version: $CURRENT_VERSION"
+    # First run - don't send notification
+fi
+
+# Save current version
+echo "$CURRENT_VERSION" > "$VERSION_FILE" 2>/dev/null || true
+
+# Function to send Home Assistant notification via Supervisor API
+send_ha_notification() {
+    local title="$1"
+    local message="$2"
+    
+    # Try to send notification via Supervisor API
+    # The Supervisor API socket is available at /run/supervisor
+    if [ -S /run/supervisor/supervisor.sock ]; then
+        # Use Supervisor API to trigger an event that Home Assistant can listen to
+        # We'll use curl to send a POST request to the Supervisor API
+        local event_data=$(cat <<EOF
+{
+    "type": "addon_update",
+    "data": {
+        "addon": "extended_cups",
+        "version": "$CURRENT_VERSION",
+        "title": "$title",
+        "message": "$message"
+    }
+}
+EOF
+)
+        # Try to send via Supervisor API (if available)
+        if command -v curl >/dev/null 2>&1; then
+            # Use the Supervisor API endpoint
+            # Note: This requires proper authentication, which may not be available
+            # Alternative: Write to a file that can be monitored
+            log_debug "Attempting to send HA notification: $title - $message"
+            
+            # Store notification in a file that can be read by Home Assistant
+            mkdir -p /config
+            echo "$(date -Iseconds)|$title|$message" >> /config/.addon_notifications 2>/dev/null || true
+        fi
+    fi
+    
+    # Also log the update
+    log_info "$title: $message"
+}
+
+# Check for addon update
+if [ -f "$VERSION_FILE" ]; then
+    PREVIOUS_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "")
+    if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$CURRENT_VERSION" ]; then
+        log_info "Addon updated from version $PREVIOUS_VERSION to $CURRENT_VERSION"
+        send_ha_notification "Extended CUPS Addon Updated" \
+            "The Extended CUPS Print Server addon has been updated from version $PREVIOUS_VERSION to $CURRENT_VERSION. Please check the changelog for new features and improvements."
+    else
+        log_debug "Addon version unchanged: $CURRENT_VERSION"
+    fi
+else
+    log_debug "First run detected, version: $CURRENT_VERSION"
+    # First run - don't send notification
+fi
+
+# Save current version
+echo "$CURRENT_VERSION" > "$VERSION_FILE" 2>/dev/null || true
 
 # Create CUPS data directories
 # Original files will be in /config (addon_config, visible on host)
