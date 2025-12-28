@@ -23,14 +23,20 @@ log_info "Starting Extended CUPS Print Server initialization..."
 
 # Current addon version (from config.yaml)
 # NOTE: Update this version number when bumping version in config.yaml
-CURRENT_VERSION="1.5.7"
+CURRENT_VERSION="1.5.8"
 VERSION_FILE="/config/.addon_version"
 
 # Check if debug mode is enabled
-DEBUG_MODE="${DEBUG:-false}"
-if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+# Home Assistant passes options as environment variables (try both uppercase and lowercase)
+DEBUG_MODE="${DEBUG:-${debug:-false}}"
+if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ] || [ "$DEBUG_MODE" = "True" ]; then
     set -x  # Enable debug output
     log_info "DEBUG MODE ENABLED - Verbose logging activated"
+    log_info "  DEBUG env var: ${DEBUG:-not set}"
+    log_info "  debug env var: ${debug:-not set}"
+    log_info "  DEBUG_MODE resolved to: $DEBUG_MODE"
+else
+    log_debug "Debug mode disabled (DEBUG=${DEBUG:-not set}, debug=${debug:-not set})"
 fi
 
 # Function to send Home Assistant notification via Supervisor API
@@ -630,11 +636,16 @@ else
 fi
 
 # Verify PPD directory setup
-log_debug "Verifying PPD directory setup..."
+log_info "Verifying PPD directory setup..."
 if [ -d /config/cups/ppds ]; then
     # Count and list PPD files (original files in /config)
     ppd_count=$(find /config/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
     log_info "Found $ppd_count PPD file(s) in /config/cups/ppds"
+    
+    if [ "$ppd_count" -eq 0 ]; then
+        log_warn "WARNING: No PPD files found in /config/cups/ppds - PPDs may have been lost!"
+        log_warn "  Check if /config/cups/ppds directory is properly mounted via addon_config"
+    fi
     
     if [ "$ppd_count" -gt 0 ]; then
         log_debug "PPD files available:"
