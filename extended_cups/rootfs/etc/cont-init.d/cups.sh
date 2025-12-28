@@ -351,7 +351,12 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                     ppd_name=$(basename "$ppd_file")
                     if [ ! -f "/data/cups/ppds/$ppd_name" ]; then
                         cp "$ppd_file" "/data/cups/ppds/$ppd_name"
-                        log_info "Migrated preinstalled PPD: $ppd_name"
+                        # Also copy to /config for visibility
+                        cp "$ppd_file" "/config/cups/ppds/$ppd_name" 2>/dev/null || true
+                        log_info "Migrated preinstalled PPD: $ppd_name (copied to /data and /config)"
+                    else
+                        # File exists in /data, ensure it's in /config too
+                        cp "/data/cups/ppds/$ppd_name" "/config/cups/ppds/$ppd_name" 2>/dev/null || true
                     fi
                 fi
             done
