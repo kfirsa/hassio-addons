@@ -45,10 +45,18 @@ if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config 
     log_info "  - /data/cups/ppds (PPD files storage)"
     log_info "  - /config/cups/ppds (accessible via /addon_configs/{REPO}_extended_cups/cups/ppds on host)"
     
-    # Create a marker file to ensure directories are visible
+    # Create marker files to ensure directories are visible
     echo "# CUPS Persistent Storage" > /data/cups/.persistent_storage_marker
     echo "# This directory contains CUPS configuration and data" >> /data/cups/.persistent_storage_marker
     echo "# Created: $(date)" >> /data/cups/.persistent_storage_marker
+    
+    # Also create marker in /config for addon_config visibility
+    if [ -d /config ]; then
+        mkdir -p /config
+        echo "# CUPS Configuration (accessible via /addon_configs)" > /config/.addon_config_marker 2>/dev/null || true
+        echo "# Created: $(date)" >> /config/.addon_config_marker 2>/dev/null || true
+        log_info "Created marker file in /config for addon_config visibility"
+    fi
     
     # Verify we can write to the persistent location
     if touch /data/cups/.write_test 2>/dev/null && rm -f /data/cups/.write_test 2>/dev/null; then
