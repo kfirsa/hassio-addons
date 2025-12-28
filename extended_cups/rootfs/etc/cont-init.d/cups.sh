@@ -40,7 +40,11 @@ mkdir -p /etc/cups
 log_info "Generating CUPS configuration file..."
 cat > /data/cups/config/cupsd.conf << EOL
 # Server root directory - ensures all config files are in persistent location
+# This MUST be an absolute path to ensure CUPS writes to persistent storage
 ServerRoot /data/cups/config
+
+# State directory for printer configurations
+StateDir /data/cups/state
 
 # Listen on all interfaces
 Listen 0.0.0.0:631
@@ -122,20 +126,54 @@ else
     log_info "Existing printers.conf found in persistent location"
 fi
 
-# Create symlinks for compatibility (CUPS will use ServerRoot, but symlinks ensure compatibility)
+# Ensure /etc/cups directory exists but remove any non-persistent printers.conf
+log_info "Preparing /etc/cups directory..."
+mkdir -p /etc/cups
+
+# If printers.conf exists in /etc/cups (non-persistent), copy it to persistent location
+if [ -f /etc/cups/printers.conf ] && [ ! -L /etc/cups/printers.conf ]; then
+    log_info "Found existing printers.conf in /etc/cups, copying to persistent location..."
+    cp /etc/cups/printers.conf /data/cups/config/printers.conf
+    chown root:lp /data/cups/config/printers.conf
+    chmod 640 /data/cups/config/printers.conf
+    rm -f /etc/cups/printers.conf
+    log_info "Migrated printers.conf to persistent location"
+fi
+
+# Remove any existing printers.conf in /etc/cups (even if symlink) to ensure clean state
+rm -f /etc/cups/printers.conf
+
+# Create symlinks - MUST be done after removing any existing files
 log_info "Creating configuration symlinks..."
 if ln -sf /data/cups/config/cupsd.conf /etc/cups/cupsd.conf && \
    ln -sf /data/cups/config/printers.conf /etc/cups/printers.conf; then
     log_info "Configuration symlinks created successfully"
 else
-    log_warn "Some symlink operations may have failed"
+    log_error "Failed to create configuration symlinks"
+    exit 1
 fi
 
-# Verify printers.conf is accessible
+# Verify symlinks are correct
+if [ -L /etc/cups/printers.conf ] && [ "$(readlink /etc/cups/printers.conf)" = "/data/cups/config/printers.conf" ]; then
+    log_info "Printers configuration symlink verified correctly"
+else
+    log_error "Printers configuration symlink is incorrect"
+    exit 1
+fi
+
+# Verify printers.conf is accessible in persistent location
 if [ -f /data/cups/config/printers.conf ] && [ -r /data/cups/config/printers.conf ]; then
-    log_info "Printers configuration file is ready and accessible"
+    log_info "Printers configuration file is ready and accessible in persistent location"
+    # Show file size to verify it has content
+    file_size=$(stat -c%s /data/cups/config/printers.conf 2>/dev/null || echo "0")
+    if [ "$file_size" -gt 0 ]; then
+        log_info "Printers configuration file contains data ($file_size bytes)"
+    else
+        log_info "Printers configuration file is empty (no printers configured yet)"
+    fi
 else
     log_error "Printers configuration file is not accessible"
+    exit 1
 fi
 
 # Verify ZJ-58 driver installation
