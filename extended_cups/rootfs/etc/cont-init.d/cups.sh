@@ -699,4 +699,4 @@ if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
 fi
 log_info "Services starting:"
 log_info "  - CUPS daemon (port 631)"
-log_info "  - Configuration sync service (monitors printers.conf for changes)"
+log_info "  - Configuration files linked via symlinks (always up-to-date automatically)"
