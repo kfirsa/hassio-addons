@@ -1,5 +1,5 @@
 ---
-version: 1.4.4
+version: 1.4.5
 slug: extended_cups
 name: Extended CUPS Print Server
 description: CUPS print server with automatic printer discovery, network printing, USB printer support, Gutenprint universal drivers, and built-in thermal printer drivers (ZJ-58, Epson TM series, Star Micronics, and more)

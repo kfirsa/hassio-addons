@@ -414,6 +414,8 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                         grep -v "^${filename}:" "$metadata_file" > "${metadata_file}.tmp" 2>/dev/null || true
                         echo "${filename}:${url}:$(date +%s)" >> "${metadata_file}.tmp"
                         mv "${metadata_file}.tmp" "$metadata_file"
+                        # Also copy to /config for visibility
+                        cp "$persistent_file" "/config/cups/ppds/$filename" 2>/dev/null || true
                         log_info "Successfully downloaded and validated: $filename"
                         download_count=$((download_count + 1))
                     else
