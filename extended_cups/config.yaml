@@ -1,5 +1,5 @@
 ---
-version: 1.4.8
+version: 1.5.0
 slug: extended_cups
 name: Extended CUPS Print Server
 description: CUPS print server with automatic printer discovery, network printing, USB printer support, Gutenprint universal drivers, and built-in thermal printer drivers (ZJ-58, Epson TM series, Star Micronics, and more)
@@ -17,6 +17,7 @@ map:
   - data:rw
   - share:rw
   - addon_config:rw
+  - ssl:ro
 init: false
 ports:
   631/tcp: 631
@@ -28,9 +29,11 @@ options:
   ppd_urls:
     - "https://www.openprinting.org/download/PPD/HP/hp-laserjet_1020.ppd"
     - "https://www.openprinting.org/download/PPD/Brother/brother-ql800.ppd"
+  debug: false
 schema:
   admin_username: str
   admin_password: password
   ppd_urls:
     - str
+  debug: bool
 startup: services

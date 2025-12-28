@@ -15,6 +15,13 @@ log_error() {
 
 log_info "Starting Extended CUPS Print Server initialization..."
 
+# Check if debug mode is enabled
+DEBUG_MODE="${DEBUG:-false}"
+if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+    set -x  # Enable debug output
+    log_info "DEBUG MODE ENABLED - Verbose logging activated"
+fi
+
 # Create CUPS data directories for persistence
 # /data is the standard persistent storage volume in Home Assistant addons
 # addon_config:rw maps to /config in container and /addon_configs/{REPO}_{slug} on host
@@ -380,7 +387,20 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
     
     # Parse PPD URLs from JSON array format
     # Extract URLs from JSON array: ["url1", "url2"] -> url1, url2
-    echo "$PPD_URLS_ENV" | grep -oE 'https?://[^"]+' | while read -r url; do
+    if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+        log_info "DEBUG: PPD_URLS_ENV = $PPD_URLS_ENV"
+        log_info "DEBUG: Extracting URLs from JSON array..."
+    fi
+    
+    # Store URLs in a temporary file to avoid subshell issues with counters
+    url_list_file="/tmp/ppd_urls_$$"
+    echo "$PPD_URLS_ENV" | grep -oE 'https?://[^"]+' > "$url_list_file" || true
+    
+    if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+        log_info "DEBUG: Found $(wc -l < "$url_list_file" | tr -d ' ') URL(s) to process"
+    fi
+    
+    while read -r url; do
         if [ -n "$url" ]; then
             filename=$(basename "$url" | sed 's/[?&].*//')
             # Ensure filename ends with .ppd
@@ -390,13 +410,26 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
             persistent_file="/data/cups/ppds/$filename"
             temp_file="/tmp/${filename}.$$"
             
+            if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                log_info "DEBUG: Processing PPD: $filename"
+                log_info "DEBUG:   URL: $url"
+                log_info "DEBUG:   Persistent file: $persistent_file"
+                log_info "DEBUG:   Temp file: $temp_file"
+            fi
+            
             # Check if file already exists and URL matches
             existing_url=$(grep "^${filename}:" "$metadata_file" 2>/dev/null | cut -d':' -f2-)
+            
+            if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                log_info "DEBUG:   Existing URL in metadata: ${existing_url:-none}"
+                log_info "DEBUG:   File exists: $([ -f "$persistent_file" ] && echo 'yes' || echo 'no')"
+            fi
             
             if [ -f "$persistent_file" ] && [ "$existing_url" = "$url" ]; then
                 # File exists and URL matches - validate it's still good
                 if validate_ppd "$persistent_file"; then
-                    log_info "PPD already exists and is valid: $filename (skipping download)"
+                    file_size=$(stat -c%s "$persistent_file" 2>/dev/null || echo "0")
+                    log_info "PPD already exists and is valid: $filename (${file_size} bytes, skipping download)"
                     skip_count=$((skip_count + 1))
                     continue
                 else
@@ -411,17 +444,41 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
             
             # Download to temporary file first
             if curl -f -L -s -o "$temp_file" "$url"; then
+                temp_size=$(stat -c%s "$temp_file" 2>/dev/null || echo "0")
+                if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                    log_info "DEBUG: Downloaded $temp_size bytes to temp file"
+                    log_info "DEBUG: First 3 lines of downloaded file:"
+                    head -n 3 "$temp_file" | while read -r line; do
+                        log_info "DEBUG:   $line"
+                    done
+                fi
+                
                 # Validate that it's a valid PPD file
                 if validate_ppd "$temp_file"; then
                     if mv "$temp_file" "$persistent_file"; then
                         chmod 644 "$persistent_file"
+                        final_size=$(stat -c%s "$persistent_file" 2>/dev/null || echo "0")
+                        
                         # Update metadata file
                         grep -v "^${filename}:" "$metadata_file" > "${metadata_file}.tmp" 2>/dev/null || true
                         echo "${filename}:${url}:$(date +%s)" >> "${metadata_file}.tmp"
                         mv "${metadata_file}.tmp" "$metadata_file"
+                        
                         # Also copy to /config for visibility
-                        cp "$persistent_file" "/config/cups/ppds/$filename" 2>/dev/null || true
-                        log_info "Successfully downloaded and validated: $filename"
+                        if cp "$persistent_file" "/config/cups/ppds/$filename" 2>/dev/null; then
+                            log_info "Successfully downloaded and validated: $filename (${final_size} bytes)"
+                            log_info "  - Stored in: $persistent_file"
+                            log_info "  - Copied to: /config/cups/ppds/$filename"
+                            
+                            # Verify both files exist
+                            if [ -f "$persistent_file" ] && [ -f "/config/cups/ppds/$filename" ]; then
+                                log_info "  - Verification: Both files exist ✓"
+                            else
+                                log_warn "  - Verification: File missing in one location!"
+                            fi
+                        else
+                            log_warn "Downloaded PPD but failed to copy to /config: $filename"
+                        fi
                         download_count=$((download_count + 1))
                     else
                         log_error "Failed to move validated PPD file: $filename"
@@ -431,14 +488,28 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
                 else
                     rm -f "$temp_file"
                     log_error "Rejected invalid PPD file from $url - file does not appear to be a valid PPD file"
+                    if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                        log_info "DEBUG: File header (first 5 lines):"
+                        head -n 5 "$temp_file" 2>/dev/null | while read -r line; do
+                            log_info "DEBUG:   $line"
+                        done
+                    fi
                     error_count=$((error_count + 1))
                 fi
             else
-                log_error "Failed to download PPD from $url"
+                curl_exit_code=$?
+                log_error "Failed to download PPD from $url (curl exit code: $curl_exit_code)"
+                if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                    log_info "DEBUG: Attempting verbose curl to diagnose issue..."
+                    curl -v -L "$url" -o /dev/null 2>&1 | head -n 20 | while read -r line; do
+                        log_info "DEBUG:   $line"
+                    done
+                fi
                 error_count=$((error_count + 1))
             fi
         fi
-    done
+    done < "$url_list_file"
+    rm -f "$url_list_file"
     
     log_info "PPD download process completed: $download_count downloaded, $update_count updated, $skip_count skipped, $error_count errors"
 else
@@ -473,7 +544,13 @@ log_info "Syncing all PPD files to /config/cups/ppds for addon_config visibility
 if [ -d /data/cups/ppds ]; then
     synced_count=0
     skipped_count=0
-    if ls /data/cups/ppds/*.ppd 1>/dev/null 2>&1; then
+    error_count=0
+    
+    # Count PPD files in /data
+    ppd_count_data=$(find /data/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+    log_info "Found $ppd_count_data PPD file(s) in /data/cups/ppds"
+    
+    if [ "$ppd_count_data" -gt 0 ]; then
         for ppd_file in /data/cups/ppds/*.ppd; do
             if [ -f "$ppd_file" ]; then
                 ppd_name=$(basename "$ppd_file")
@@ -481,20 +558,62 @@ if [ -d /data/cups/ppds ]; then
                 if [ "$ppd_name" = ".ppd_metadata" ]; then
                     continue
                 fi
+                
+                file_size=$(stat -c%s "$ppd_file" 2>/dev/null || echo "0")
+                
                 # Copy if doesn't exist or is newer
                 if [ ! -f "/config/cups/ppds/$ppd_name" ] || [ "$ppd_file" -nt "/config/cups/ppds/$ppd_name" ]; then
                     if cp "$ppd_file" "/config/cups/ppds/$ppd_name" 2>/dev/null; then
                         synced_count=$((synced_count + 1))
-                        log_info "Synced PPD to /config: $ppd_name"
+                        log_info "Synced PPD to /config: $ppd_name (${file_size} bytes)"
+                        
+                        # Verify the copy
+                        if [ -f "/config/cups/ppds/$ppd_name" ]; then
+                            config_size=$(stat -c%s "/config/cups/ppds/$ppd_name" 2>/dev/null || echo "0")
+                            if [ "$file_size" = "$config_size" ]; then
+                                if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                                    log_info "DEBUG: Verified copy - sizes match ($file_size bytes)"
+                                fi
+                            else
+                                log_warn "Size mismatch after copy: $file_size vs $config_size"
+                            fi
+                        else
+                            log_error "Copy failed - file not found in /config after copy attempt"
+                            error_count=$((error_count + 1))
+                        fi
                     else
                         log_warn "Failed to sync PPD to /config: $ppd_name"
+                        error_count=$((error_count + 1))
                     fi
                 else
                     skipped_count=$((skipped_count + 1))
+                    if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+                        log_info "DEBUG: Skipped (already up-to-date): $ppd_name"
+                    fi
                 fi
             fi
         done
-        log_info "PPD sync completed: $synced_count synced, $skipped_count already up-to-date"
+        
+        # Final verification
+        ppd_count_config=$(find /config/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+        log_info "PPD sync completed: $synced_count synced, $skipped_count already up-to-date, $error_count errors"
+        log_info "PPD file counts: $ppd_count_data in /data, $ppd_count_config in /config"
+        
+        if [ "$ppd_count_data" -ne "$ppd_count_config" ]; then
+            log_warn "PPD count mismatch: /data has $ppd_count_data, /config has $ppd_count_config"
+        fi
+        
+        # List all PPDs in both locations if debug mode
+        if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+            log_info "DEBUG: PPD files in /data/cups/ppds:"
+            ls -lh /data/cups/ppds/*.ppd 2>/dev/null | while read -r line; do
+                log_info "DEBUG:   $line"
+            done
+            log_info "DEBUG: PPD files in /config/cups/ppds:"
+            ls -lh /config/cups/ppds/*.ppd 2>/dev/null | while read -r line; do
+                log_info "DEBUG:   $line"
+            done
+        fi
     else
         log_info "No PPD files found in /data/cups/ppds to sync"
     fi
@@ -581,9 +700,59 @@ else
     exit 1
 fi
 
+# Final PPD verification summary
+log_info "=== PPD Download and Storage Summary ==="
+if [ -d /data/cups/ppds ]; then
+    total_ppds=$(find /data/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+    log_info "Total PPD files in persistent storage (/data/cups/ppds): $total_ppds"
+    
+    if [ -d /config/cups/ppds ]; then
+        config_ppds=$(find /config/cups/ppds -maxdepth 1 -name "*.ppd" -type f 2>/dev/null | wc -l | tr -d ' ')
+        log_info "Total PPD files in addon_config (/config/cups/ppds): $config_ppds"
+        log_info "PPD files accessible at: /addon_configs/{REPO}_extended_cups/cups/ppds/"
+        
+        if [ "$total_ppds" -gt 0 ]; then
+            log_info "PPD files available:"
+            for ppd in /data/cups/ppds/*.ppd; do
+                if [ -f "$ppd" ]; then
+                    ppd_name=$(basename "$ppd")
+                    if [ "$ppd_name" != ".ppd_metadata" ]; then
+                        size=$(stat -c%s "$ppd" 2>/dev/null || echo "0")
+                        if [ -f "/config/cups/ppds/$ppd_name" ]; then
+                            log_info "  ✓ $ppd_name (${size} bytes) - available in both locations"
+                        else
+                            log_warn "  ⚠ $ppd_name (${size} bytes) - missing in /config"
+                        fi
+                    fi
+                fi
+            done
+        fi
+    else
+        log_warn "/config/cups/ppds directory does not exist"
+    fi
+else
+    log_warn "/data/cups/ppds directory does not exist"
+fi
+log_info "========================================="
+
+# Copy logs to /config for visibility if debug mode
+if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+    log_info "DEBUG: Creating logs directory in /config for visibility..."
+    mkdir -p /config/logs
+    # Create a symlink or copy mechanism for logs
+    if [ -d /data/cups/logs ]; then
+        log_info "DEBUG: CUPS logs available in /data/cups/logs"
+        log_info "DEBUG: To view logs, check addon logs in Home Assistant UI"
+    fi
+fi
+
 log_info "Initialization complete!"
 log_info "Automatic printer discovery enabled:"
 log_info "  - USB printers: Auto-detected via USB backend"
 log_info "  - Network printers: Auto-discovered via mDNS/Bonjour (Avahi)"
-log_info "  - Printer configurations: Persisted in /data/cups/config"
+log_info "  - Printer configurations: Persisted in /data/cups/config (visible via /config/cups/config)"
+log_info "  - PPD files: Persisted in /data/cups/ppds (visible via /config/cups/ppds)"
+if [ "$DEBUG_MODE" = "true" ] || [ "$DEBUG_MODE" = "1" ]; then
+    log_info "  - Debug mode: ENABLED - Check logs for detailed information"
+fi
 log_info "CUPS service will be started by s6 service manager"
