@@ -1,0 +1,28 @@
+#!/usr/bin/with-contenv bash
+
+# Logging functions
+log_info() {
+    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') $*"
+}
+
+log_error() {
+    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+}
+
+log_info "Starting CUPS daemon..."
+
+# Verify /etc/cups symlink is correct
+if [ ! -L /etc/cups ] || [ "$(readlink /etc/cups)" != "/data/cups/config" ]; then
+    log_error "/etc/cups symlink is not correctly configured"
+    exit 1
+fi
+
+# Verify cupsd.conf exists
+if [ ! -f /data/cups/config/cupsd.conf ]; then
+    log_error "CUPS configuration file not found at /data/cups/config/cupsd.conf"
+    exit 1
+fi
+
+# Start CUPS daemon in foreground (s6 will manage it)
+exec /usr/sbin/cupsd -f
+

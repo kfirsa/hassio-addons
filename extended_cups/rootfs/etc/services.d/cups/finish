@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bash
+
+# Logging function
+log_info() {
+    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') $*"
+}
+
+log_info "CUPS daemon stopped"
+

@@ -443,10 +443,9 @@ else
     exit 1
 fi
 
-log_info "Initialization complete, starting CUPS service..."
+log_info "Initialization complete!"
 log_info "Automatic printer discovery enabled:"
 log_info "  - USB printers: Auto-detected via USB backend"
 log_info "  - Network printers: Auto-discovered via mDNS/Bonjour (Avahi)"
 log_info "  - Printer configurations: Persisted in /data/cups/config"
-# Start CUPS service
-/usr/sbin/cupsd -f
+log_info "CUPS service will be started by s6 service manager"
