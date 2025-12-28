@@ -24,18 +24,13 @@ if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config 
     
     # Also create directories in /config for addon_config mapping (user-accessible)
     # This makes files visible in /addon_configs/{REPO}_extended_cups on the host
+    # Note: We create actual directories (not symlinks) because symlinks may not
+    # work properly across the addon_config mount boundary
     if mkdir -p /config/cups/config /config/cups/ppds; then
         log_info "Created directories in /config for addon_config mapping"
-        # Create symlinks from /config to /data to avoid duplication
-        # Users can access files via /addon_configs, but data is stored in /data
-        if [ ! -L /config/cups/config ] && [ ! -d /config/cups/config ]; then
-            ln -sf /data/cups/config /config/cups/config
-            log_info "Created symlink: /config/cups/config -> /data/cups/config"
-        fi
-        if [ ! -L /config/cups/ppds ] && [ ! -d /config/cups/ppds ]; then
-            ln -sf /data/cups/ppds /config/cups/ppds
-            log_info "Created symlink: /config/cups/ppds -> /data/cups/ppds"
-        fi
+        log_info "Files in /config will be visible at /addon_configs/{REPO}_extended_cups/ on host"
+    else
+        log_warn "Failed to create directories in /config"
     fi
     
     # Verify directories exist and show their locations
@@ -198,14 +193,11 @@ EOL
 
 if [ -f /data/cups/config/cupsd.conf ]; then
     log_info "CUPS configuration file created successfully at /data/cups/config/cupsd.conf"
-    # Verify it's accessible via /config symlink
-    if [ -f /config/cups/config/cupsd.conf ]; then
-        log_info "CUPS configuration file is accessible via /config/cups/config/cupsd.conf"
+    # Copy to /config so it's visible in addon_config directory
+    if cp /data/cups/config/cupsd.conf /config/cups/config/cupsd.conf 2>/dev/null; then
+        log_info "CUPS configuration file copied to /config/cups/config/cupsd.conf (visible in addon_config)"
     else
-        log_warn "CUPS configuration file not accessible via /config symlink - checking symlink..."
-        if [ -L /config/cups/config ]; then
-            log_info "Symlink exists: /config/cups/config -> $(readlink /config/cups/config)"
-        fi
+        log_warn "Failed to copy cupsd.conf to /config/cups/config (files may not be visible in addon_config)"
     fi
 else
     log_error "Failed to create CUPS configuration file"
@@ -218,6 +210,10 @@ log_info "Initializing printers configuration file in persistent storage..."
 if [ ! -f /data/cups/config/printers.conf ]; then
     if touch /data/cups/config/printers.conf && chown root:lp /data/cups/config/printers.conf && chmod 640 /data/cups/config/printers.conf; then
         log_info "Created new printers.conf in persistent location: /data/cups/config/printers.conf"
+        # Also create in /config for visibility
+        if touch /config/cups/config/printers.conf && chown root:lp /config/cups/config/printers.conf && chmod 640 /config/cups/config/printers.conf; then
+            log_info "Created printers.conf in /config/cups/config (visible in addon_config)"
+        fi
         log_info "  (Host path: /config/addon_configs/{REPO}_extended_cups/cups/config/printers.conf)"
     else
         log_error "Failed to create printers.conf in persistent location"
@@ -225,6 +221,13 @@ if [ ! -f /data/cups/config/printers.conf ]; then
     fi
 else
     log_info "Existing printers.conf found in persistent location"
+    # Copy to /config if it doesn't exist there or is older
+    if [ ! -f /config/cups/config/printers.conf ] || [ /data/cups/config/printers.conf -nt /config/cups/config/printers.conf ]; then
+        cp /data/cups/config/printers.conf /config/cups/config/printers.conf 2>/dev/null && \
+        chown root:lp /config/cups/config/printers.conf 2>/dev/null && \
+        chmod 640 /config/cups/config/printers.conf 2>/dev/null && \
+        log_info "Synced printers.conf to /config/cups/config"
+    fi
     # Show file size to verify it has content
     file_size=$(stat -c%s /data/cups/config/printers.conf 2>/dev/null || echo "0")
     if [ "$file_size" -gt 0 ]; then
@@ -251,12 +254,13 @@ Files in this directory:
 - Other CUPS configuration files as needed
 
 Location:
-- Container path: /data/cups/config (primary storage)
+- Container path: /data/cups/config (primary storage, CUPS writes here)
 - Host path: /config/addon_configs/{REPO}_extended_cups/cups/config
-- Accessible via: /config/cups/config (symlink)
+- Accessible via: /config/cups/config (copied from /data for visibility)
 
-Note: Files are stored in /data/cups/config and symlinked to /config/cups/config
-for user accessibility via the addon_config mapping.
+Note: Files are stored in /data/cups/config (primary) and copied to /config/cups/config
+for user accessibility via the addon_config mapping. CUPS writes to /data, files are
+synced to /config for visibility.
 
 To add printers:
 1. Access the CUPS web interface at http://<your-ip>:631
