@@ -329,11 +329,11 @@ fi
 # Verify CUPS binary exists
 if [ -x /usr/sbin/cupsd ]; then
     log_info "CUPS daemon found, starting service..."
-    # Verify ServerRoot is correctly set in cupsd.conf
-    if grep -q "^ServerRoot /data/cups/config" /data/cups/config/cupsd.conf; then
-        log_info "ServerRoot correctly configured in cupsd.conf"
+    # Verify /etc/cups symlink is correct (CUPS will use default /etc/cups location)
+    if [ -L /etc/cups ] && [ "$(readlink /etc/cups)" = "/data/cups/config" ]; then
+        log_info "CUPS will write to /etc/cups (mapped to persistent /data/cups/config)"
     else
-        log_error "ServerRoot not correctly configured in cupsd.conf"
+        log_error "/etc/cups symlink is not correctly configured"
         exit 1
     fi
 else
