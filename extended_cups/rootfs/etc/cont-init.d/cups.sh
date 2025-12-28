@@ -17,7 +17,7 @@ log_info "Starting Extended CUPS Print Server initialization..."
 
 # Create CUPS data directories for persistence
 log_info "Creating CUPS data directories..."
-if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config; then
+if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config /data/cups/ppds; then
     log_info "CUPS data directories created successfully"
 else
     log_error "Failed to create CUPS data directories"
@@ -218,18 +218,49 @@ validate_ppd() {
 
 # Download additional PPD files from OpenPrinting if configured
 # Home Assistant passes list options as JSON arrays in environment variables
+# PPDs are stored in persistent location and only downloaded if missing or URL changed
 PPD_URLS_ENV="${PPD_URLS:-[]}"
 if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
-    log_info "PPD URLs configured, starting download process..."
-    # Create directory for downloaded PPDs
-    if mkdir -p /usr/share/cups/model/openprinting; then
-        log_info "OpenPrinting PPD directory ready"
+    log_info "PPD URLs configured, checking for downloads/updates..."
+    
+    # Create persistent directory for downloaded PPDs
+    if mkdir -p /data/cups/ppds; then
+        log_info "Persistent PPD directory ready"
     else
-        log_error "Failed to create OpenPrinting PPD directory"
+        log_error "Failed to create persistent PPD directory"
+    fi
+    
+    # Create symlink from CUPS model directory to persistent location
+    # First, migrate any preinstalled PPDs from Docker image to persistent location
+    if [ -d /usr/share/cups/model/openprinting ] && [ ! -L /usr/share/cups/model/openprinting ]; then
+        if [ "$(ls -A /usr/share/cups/model/openprinting 2>/dev/null)" ]; then
+            log_info "Migrating preinstalled PPDs from image to persistent location..."
+            for ppd_file in /usr/share/cups/model/openprinting/*.ppd; do
+                if [ -f "$ppd_file" ]; then
+                    ppd_name=$(basename "$ppd_file")
+                    if [ ! -f "/data/cups/ppds/$ppd_name" ]; then
+                        cp "$ppd_file" "/data/cups/ppds/$ppd_name"
+                        log_info "Migrated preinstalled PPD: $ppd_name"
+                    fi
+                fi
+            done
+        fi
+        rm -rf /usr/share/cups/model/openprinting
+    fi
+    
+    if [ ! -L /usr/share/cups/model/openprinting ]; then
+        ln -sf /data/cups/ppds /usr/share/cups/model/openprinting
+        log_info "Created symlink from /usr/share/cups/model/openprinting to persistent location"
     fi
     
     download_count=0
+    skip_count=0
     error_count=0
+    update_count=0
+    
+    # Create metadata file to track downloads
+    metadata_file="/data/cups/ppds/.ppd_metadata"
+    touch "$metadata_file"
     
     # Parse PPD URLs from JSON array format
     # Extract URLs from JSON array: ["url1", "url2"] -> url1, url2
@@ -240,14 +271,38 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
             if [ "${filename##*.}" != "ppd" ]; then
                 filename="${filename}.ppd"
             fi
-            temp_file="/tmp/${filename}"
+            persistent_file="/data/cups/ppds/$filename"
+            temp_file="/tmp/${filename}.$$"
+            
+            # Check if file already exists and URL matches
+            existing_url=$(grep "^${filename}:" "$metadata_file" 2>/dev/null | cut -d':' -f2-)
+            
+            if [ -f "$persistent_file" ] && [ "$existing_url" = "$url" ]; then
+                # File exists and URL matches - validate it's still good
+                if validate_ppd "$persistent_file"; then
+                    log_info "PPD already exists and is valid: $filename (skipping download)"
+                    skip_count=$((skip_count + 1))
+                    continue
+                else
+                    log_warn "Existing PPD file is invalid, re-downloading: $filename"
+                fi
+            elif [ -f "$persistent_file" ] && [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
+                log_info "URL changed for $filename, updating..."
+                update_count=$((update_count + 1))
+            fi
+            
             log_info "Downloading PPD: $filename from $url"
             
             # Download to temporary file first
             if curl -f -L -s -o "$temp_file" "$url"; then
                 # Validate that it's a valid PPD file
                 if validate_ppd "$temp_file"; then
-                    if mv "$temp_file" "/usr/share/cups/model/openprinting/$filename"; then
+                    if mv "$temp_file" "$persistent_file"; then
+                        chmod 644 "$persistent_file"
+                        # Update metadata file
+                        grep -v "^${filename}:" "$metadata_file" > "${metadata_file}.tmp" 2>/dev/null || true
+                        echo "${filename}:${url}:$(date +%s)" >> "${metadata_file}.tmp"
+                        mv "${metadata_file}.tmp" "$metadata_file"
                         log_info "Successfully downloaded and validated: $filename"
                         download_count=$((download_count + 1))
                     else
@@ -267,9 +322,14 @@ if [ "$PPD_URLS_ENV" != "[]" ] && [ -n "$PPD_URLS_ENV" ]; then
         fi
     done
     
-    log_info "PPD download process completed"
+    log_info "PPD download process completed: $download_count downloaded, $update_count updated, $skip_count skipped, $error_count errors"
 else
     log_info "No additional PPD URLs configured, skipping download"
+    # Still create symlink for preinstalled PPDs
+    if [ ! -L /usr/share/cups/model/openprinting ]; then
+        mkdir -p /data/cups/ppds
+        ln -sf /data/cups/ppds /usr/share/cups/model/openprinting
+    fi
 fi
 
 # Ensure USB devices are accessible
