@@ -16,9 +16,23 @@ log_error() {
 log_info "Starting Extended CUPS Print Server initialization..."
 
 # Create CUPS data directories for persistence
-log_info "Creating CUPS data directories..."
+# Note: /data maps to /config/addon_configs/<slug> on the host via 'data:rw' mapping
+log_info "Creating CUPS data directories in persistent storage (/data)..."
 if mkdir -p /data/cups/cache /data/cups/logs /data/cups/state /data/cups/config /data/cups/ppds; then
     log_info "CUPS data directories created successfully"
+    # Verify directories exist and show their locations
+    log_info "Persistent storage directories:"
+    log_info "  - Config: /data/cups/config (maps to /config/addon_configs/extended_cups/cups/config on host)"
+    log_info "  - PPDs: /data/cups/ppds (maps to /config/addon_configs/extended_cups/cups/ppds on host)"
+    log_info "  - Cache: /data/cups/cache"
+    log_info "  - Logs: /data/cups/logs"
+    log_info "  - State: /data/cups/state"
+    # Verify we can write to the persistent location
+    if touch /data/cups/.write_test 2>/dev/null && rm -f /data/cups/.write_test 2>/dev/null; then
+        log_info "Verified write access to persistent storage"
+    else
+        log_warn "Warning: May not have write access to persistent storage"
+    fi
 else
     log_error "Failed to create CUPS data directories"
     exit 1
