@@ -311,6 +311,13 @@ fi
 # Verify CUPS binary exists
 if [ -x /usr/sbin/cupsd ]; then
     log_info "CUPS daemon found, starting service..."
+    # Verify ServerRoot is correctly set in cupsd.conf
+    if grep -q "^ServerRoot /data/cups/config" /data/cups/config/cupsd.conf; then
+        log_info "ServerRoot correctly configured in cupsd.conf"
+    else
+        log_error "ServerRoot not correctly configured in cupsd.conf"
+        exit 1
+    fi
 else
     log_error "CUPS daemon not found at /usr/sbin/cupsd"
     exit 1
