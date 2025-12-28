@@ -4,11 +4,12 @@ FROM $BUILD_FROM
 # Add env
 ENV LANG=C.UTF-8
 # Set CUPS environment variables for data persistence
+# Note: CUPS_SERVERROOT is not set - CUPS will use default /etc/cups
+# /etc/cups will be symlinked to /data/cups/config in init script
 ENV CUPS_DATADIR=/data/cups
 ENV CUPS_CACHEDIR=/data/cups/cache
 ENV CUPS_LOGDIR=/data/cups/logs
 ENV CUPS_STATEDIR=/data/cups/state
-ENV CUPS_SERVERROOT=/data/cups/config
 
 # Setup base
 RUN \

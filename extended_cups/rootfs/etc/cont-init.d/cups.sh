@@ -32,19 +32,61 @@ else
     log_warn "Some permission operations may have failed"
 fi
 
-# Create CUPS configuration directory if it doesn't exist
-log_info "Creating CUPS configuration directory..."
-mkdir -p /etc/cups
+# Make /etc/cups a symlink to persistent location
+# This ensures ALL CUPS writes go directly to persistent storage
+log_info "Setting up CUPS configuration directory..."
+if [ -d /etc/cups ] && [ ! -L /etc/cups ]; then
+    # If /etc/cups exists as a directory, move any existing files to persistent location
+    log_info "Migrating existing /etc/cups files to persistent location..."
+    if [ -f /etc/cups/printers.conf ]; then
+        cp /etc/cups/printers.conf /data/cups/config/printers.conf 2>/dev/null || true
+        log_info "Migrated printers.conf to persistent location"
+    fi
+    if [ -f /etc/cups/cupsd.conf ]; then
+        # Only copy if our persistent one doesn't exist
+        if [ ! -f /data/cups/config/cupsd.conf ]; then
+            cp /etc/cups/cupsd.conf /data/cups/config/cupsd.conf 2>/dev/null || true
+        fi
+    fi
+    # Remove the directory
+    rm -rf /etc/cups
+    log_info "Removed /etc/cups directory for symlink creation"
+fi
+
+# Create symlink from /etc/cups to persistent location
+# This ensures CUPS writes directly to persistent storage
+if [ ! -L /etc/cups ]; then
+    ln -sf /data/cups/config /etc/cups
+    log_info "Created /etc/cups symlink to persistent location"
+else
+    # Verify the symlink points to the correct location
+    current_link=$(readlink /etc/cups)
+    if [ "$current_link" != "/data/cups/config" ]; then
+        log_warn "Existing /etc/cups symlink points to $current_link, recreating..."
+        rm -f /etc/cups
+        ln -sf /data/cups/config /etc/cups
+        log_info "Recreated /etc/cups symlink to persistent location"
+    else
+        log_info "/etc/cups symlink already points to persistent location"
+    fi
+fi
+
+# Verify the symlink works
+if [ -L /etc/cups ] && [ -d /etc/cups ]; then
+    log_info "CUPS configuration directory symlink verified"
+else
+    log_error "Failed to create /etc/cups symlink"
+    exit 1
+fi
 
 # Basic CUPS configuration without admin authentication
+# Note: We don't set ServerRoot here - CUPS will use default /etc/cups
+# Since /etc/cups is a symlink to /data/cups/config, all writes persist automatically
 log_info "Generating CUPS configuration file..."
 cat > /data/cups/config/cupsd.conf << EOL
-# Server root directory - ensures all config files are in persistent location
-# This MUST be an absolute path to ensure CUPS writes to persistent storage
-ServerRoot /data/cups/config
-
-# State directory for printer configurations
-StateDir /data/cups/state
+# Note: ServerRoot defaults to /etc/cups
+# Since /etc/cups is symlinked to /data/cups/config (persistent storage),
+# all CUPS configuration files will automatically persist across restarts
 
 # Listen on all interfaces
 Listen 0.0.0.0:631
@@ -124,46 +166,6 @@ if [ ! -f /data/cups/config/printers.conf ]; then
     log_info "Created new printers.conf in persistent location"
 else
     log_info "Existing printers.conf found in persistent location"
-fi
-
-# Ensure /etc/cups directory exists but remove any non-persistent printers.conf
-log_info "Preparing /etc/cups directory..."
-mkdir -p /etc/cups
-
-# If printers.conf exists in /etc/cups (non-persistent), copy it to persistent location
-if [ -f /etc/cups/printers.conf ] && [ ! -L /etc/cups/printers.conf ]; then
-    log_info "Found existing printers.conf in /etc/cups, copying to persistent location..."
-    cp /etc/cups/printers.conf /data/cups/config/printers.conf
-    chown root:lp /data/cups/config/printers.conf
-    chmod 640 /data/cups/config/printers.conf
-    rm -f /etc/cups/printers.conf
-    log_info "Migrated printers.conf to persistent location"
-fi
-
-# Remove any existing printers.conf in /etc/cups (even if symlink) to ensure clean state
-rm -f /etc/cups/printers.conf
-
-# Create symlinks - MUST be done after removing any existing files
-log_info "Creating configuration symlinks..."
-if ln -sf /data/cups/config/cupsd.conf /etc/cups/cupsd.conf && \
-   ln -sf /data/cups/config/printers.conf /etc/cups/printers.conf; then
-    log_info "Configuration symlinks created successfully"
-else
-    log_error "Failed to create configuration symlinks"
-    exit 1
-fi
-
-# Verify symlinks are correct
-if [ -L /etc/cups/printers.conf ] && [ "$(readlink /etc/cups/printers.conf)" = "/data/cups/config/printers.conf" ]; then
-    log_info "Printers configuration symlink verified correctly"
-else
-    log_error "Printers configuration symlink is incorrect"
-    exit 1
-fi
-
-# Verify printers.conf is accessible in persistent location
-if [ -f /data/cups/config/printers.conf ] && [ -r /data/cups/config/printers.conf ]; then
-    log_info "Printers configuration file is ready and accessible in persistent location"
     # Show file size to verify it has content
     file_size=$(stat -c%s /data/cups/config/printers.conf 2>/dev/null || echo "0")
     if [ "$file_size" -gt 0 ]; then
@@ -171,8 +173,24 @@ if [ -f /data/cups/config/printers.conf ] && [ -r /data/cups/config/printers.con
     else
         log_info "Printers configuration file is empty (no printers configured yet)"
     fi
+fi
+
+# Verify /etc/cups symlink is working correctly
+# Since /etc/cups is now a symlink to /data/cups/config, all CUPS writes go to persistent storage
+if [ -L /etc/cups ] && [ -d /etc/cups ]; then
+    link_target=$(readlink /etc/cups)
+    if [ "$link_target" = "/data/cups/config" ]; then
+        log_info "/etc/cups symlink verified - all CUPS writes will persist"
+        # Verify printers.conf is accessible through the symlink
+        if [ -f /etc/cups/printers.conf ] && [ -r /etc/cups/printers.conf ]; then
+            log_info "Printers configuration accessible through /etc/cups symlink"
+        fi
+    else
+        log_error "/etc/cups symlink points to wrong location: $link_target"
+        exit 1
+    fi
 else
-    log_error "Printers configuration file is not accessible"
+    log_error "/etc/cups symlink not properly created"
     exit 1
 fi
 
