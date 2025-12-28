@@ -9,11 +9,17 @@ log_error() {
     echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
 }
 
+log_warn() {
+    echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') $*" >&2
+}
+
 log_info "Starting CUPS daemon..."
 
 # Verify /etc/cups symlink is correct
 if [ ! -L /etc/cups ] || [ "$(readlink /etc/cups)" != "/data/cups/config" ]; then
     log_error "/etc/cups symlink is not correctly configured"
+    log_error "Expected: /etc/cups -> /data/cups/config"
+    log_error "Actual: $(readlink -f /etc/cups 2>/dev/null || echo 'not a symlink')"
     exit 1
 fi
 
@@ -23,6 +29,33 @@ if [ ! -f /data/cups/config/cupsd.conf ]; then
     exit 1
 fi
 
+# Verify cupsd binary exists
+if [ ! -x /usr/sbin/cupsd ]; then
+    log_error "CUPS daemon binary not found at /usr/sbin/cupsd"
+    exit 1
+fi
+
+# Check if CUPS is already running
+if pgrep -x cupsd > /dev/null; then
+    log_warn "CUPS daemon appears to already be running, killing existing process..."
+    pkill -9 cupsd || true
+    sleep 1
+fi
+
+# Set CUPS environment variables
+export CUPS_DATADIR=/data/cups
+export CUPS_CACHEDIR=/data/cups/cache
+export CUPS_LOGDIR=/data/cups/logs
+export CUPS_STATEDIR=/data/cups/state
+
+log_info "CUPS configuration:"
+log_info "  - Config: /data/cups/config (symlinked from /etc/cups)"
+log_info "  - Logs: /data/cups/logs"
+log_info "  - State: /data/cups/state"
+log_info "  - Cache: /data/cups/cache"
+log_info "Starting CUPS daemon on port 631..."
+
 # Start CUPS daemon in foreground (s6 will manage it)
-exec /usr/sbin/cupsd -f
+# Use -f to run in foreground and -l for logging to stderr
+exec /usr/sbin/cupsd -f -l error
 
