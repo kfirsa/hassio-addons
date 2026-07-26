@@ -36,7 +36,27 @@ if ! bashio::config.has_value 'admin_password' || [[ -z "${ADMIN_PASSWORD}" ]]; 
     bashio::exit.nok "Option 'admin_password' is required. Set it in the add-on configuration."
 fi
 
-HOSTNAME=$(bashio::config 'hostname')
+HOSTNAME=""
+if bashio::config.has_value 'hostname'; then
+    HOSTNAME=$(bashio::config 'hostname')
+fi
+
+if [[ -z "${HOSTNAME}" ]]; then
+    DISCOVERED=""
+    if bashio::supervisor.ping; then
+        DISCOVERED=$(bashio::host.hostname 2>/dev/null || true)
+    fi
+    if [[ -n "${DISCOVERED}" ]]; then
+        HOSTNAME="${DISCOVERED}"
+        bashio::log.info "Discovered host hostname: ${HOSTNAME}"
+    else
+        HOSTNAME="homeassistant.local"
+        bashio::log.info "Host hostname unavailable; using default: ${HOSTNAME}"
+    fi
+else
+    bashio::log.info "Using configured hostname: ${HOSTNAME}"
+fi
+
 LOCATION=$(bashio::config 'location')
 ADMIN=$(bashio::config 'admin')
 MAX_CLIENTS=$(bashio::config 'max_clients')

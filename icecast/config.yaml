@@ -1,6 +1,6 @@
 ---
 name: Icecast
-version: 1.0.1
+version: 1.0.2
 slug: icecast
 description: Icecast streaming server with Home Assistant Ingress admin UI
 url: https://github.com/kfirsa/hassio-addons
@@ -13,6 +13,7 @@ arch:
 startup: services
 boot: auto
 init: false
+hassio_api: true
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:radio-tower
@@ -25,7 +26,6 @@ ports:
 ports_description:
   8000/tcp: Icecast streams (sources and listeners)
 options:
-  hostname: "local"
   location: "Home"
   admin: "admin@example.com"
   max_clients: 100
@@ -34,7 +34,7 @@ schema:
   source_password: password
   relay_password: password
   admin_password: password
-  hostname: str
+  hostname: str?
   location: str
   admin: str
   max_clients: int
