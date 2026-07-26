@@ -102,4 +102,5 @@ Replace `HOMEASSISTANT_HOST` with the host IP or the same name you use for liste
 - This add-on runs the Icecast **server only**. Source encoding (ffmpeg, IceS, butt, etc.) runs elsewhere and connects to port 8000.
 - Ingress is for the web UI only. Do not rely on Ingress for live stream playback; use port **8000**.
 - TLS is not terminated inside the add-on; use your reverse proxy or Home Assistant networking as needed.
-- Icecast version comes from the Alpine package on the Home Assistant base image (commonly 2.4.x).
+- Icecast version comes from the Alpine package on the Home Assistant base image (commonly 2.4.x / 2.5.x).
+- Release notes for each version are in [`CHANGELOG.md`](CHANGELOG.md) (shown in Home Assistant when an update is available).

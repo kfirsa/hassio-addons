@@ -1,6 +1,6 @@
 ---
 name: Icecast
-version: 1.0.4
+version: 1.0.5
 slug: icecast
 description: Icecast streaming server with Home Assistant Ingress admin UI
 url: https://github.com/kfirsa/hassio-addons
