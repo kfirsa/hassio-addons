@@ -1,0 +1,15 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start nginx Ingress front-end
+# ==============================================================================
+set -e
+
+# Wait briefly for Icecast to accept connections
+bashio::net.wait_for 8000 localhost 30 || true
+
+if ! bashio::fs.file_exists '/data/nginx/ingress.conf'; then
+    bashio::exit.nok "nginx Ingress configuration missing"
+fi
+
+bashio::log.info "Starting nginx Ingress proxy on port 8099..."
+exec nginx -c /data/nginx/ingress.conf -g 'daemon off;'

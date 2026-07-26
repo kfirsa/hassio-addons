@@ -1,0 +1,12 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start Icecast
+# ==============================================================================
+set -e
+
+if ! bashio::fs.file_exists '/data/icecast.xml'; then
+    bashio::exit.nok "Icecast configuration missing at /data/icecast.xml"
+fi
+
+bashio::log.info "Starting Icecast on port 8000..."
+exec icecast -c /data/icecast.xml
