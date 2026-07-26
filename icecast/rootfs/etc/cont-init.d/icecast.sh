@@ -97,9 +97,14 @@ else
     BASEDIR="/usr/share/icecast"
 fi
 
-# Ensure icecast can write logs
+# Ensure icecast can write logs and PRNG seed; config must not be world-readable
+mkdir -p /data/log
 chown -R icecast:icecast /data/log 2>/dev/null || true
-chmod 755 /data/log
+chmod 750 /data/log
+touch /data/log/icecast.pid /data/log/access.log /data/log/error.log /data/log/icecast.prng-seed
+chown icecast:icecast /data/log/icecast.pid /data/log/access.log /data/log/error.log /data/log/icecast.prng-seed
+chmod 640 /data/log/access.log /data/log/error.log /data/log/icecast.prng-seed
+chmod 644 /data/log/icecast.pid
 
 # ---------------------------------------------------------------------------
 # icecast.xml
@@ -119,7 +124,6 @@ cat > /data/icecast.xml <<EOF
         <client-timeout>30</client-timeout>
         <header-timeout>15</header-timeout>
         <source-timeout>${SOURCE_TIMEOUT}</source-timeout>
-        <burst-on-connect>1</burst-on-connect>
         <burst-size>65535</burst-size>
     </limits>
 
@@ -164,8 +168,14 @@ cat > /data/icecast.xml <<EOF
             <group>icecast</group>
         </changeowner>
     </security>
+
+    <prng-seed type="read-write" size="1024">/data/log/icecast.prng-seed</prng-seed>
+    <prng-seed type="profile">linux</prng-seed>
 </icecast>
 EOF
+
+chmod 640 /data/icecast.xml
+chown root:icecast /data/icecast.xml 2>/dev/null || chown root:root /data/icecast.xml
 
 # ---------------------------------------------------------------------------
 # nginx Ingress front-end (port 8099)
@@ -228,8 +238,8 @@ http {
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Accept-Encoding "";
 
-            # Icecast serves XSL as text/html or text/xml; rewrite absolute paths
-            sub_filter_types text/html text/css text/xml application/xml application/xhtml+xml;
+            # text/html is implied by sub_filter; listing it causes a duplicate MIME warning
+            sub_filter_types text/css text/xml application/xml application/xhtml+xml;
             sub_filter_once off;
             sub_filter 'href="/' 'href="$ingress_path/';
             sub_filter "href='/" "href='$ingress_path/";
