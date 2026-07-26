@@ -1,6 +1,6 @@
 ---
 name: Icecast
-version: 1.0.2
+version: 1.0.3
 slug: icecast
 description: Icecast streaming server with Home Assistant Ingress admin UI
 url: https://github.com/kfirsa/hassio-addons
@@ -30,6 +30,7 @@ options:
   admin: "admin@example.com"
   max_clients: 100
   max_sources: 10
+  source_timeout: 86400
 schema:
   source_password: password
   relay_password: password
@@ -39,3 +40,4 @@ schema:
   admin: str
   max_clients: int
   max_sources: int
+  source_timeout: int

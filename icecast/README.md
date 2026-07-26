@@ -47,6 +47,7 @@ Admin pages under `/admin/` still use Icecast HTTP Basic Auth (`admin` + your `a
 | `admin` | Contact shown on the status page | `admin@example.com` |
 | `max_clients` | Maximum concurrent listeners | `100` |
 | `max_sources` | Maximum concurrent sources | `10` |
+| `source_timeout` | Seconds without data before Icecast drops a source. Use a high value for intermittent streams (e.g. SDRTrunk) | `86400` (24h) |
 
 ### Hostname
 
@@ -75,7 +76,10 @@ location: "Home"
 admin: "you@example.com"
 max_clients: 100
 max_sources: 10
+source_timeout: 86400
 ```
+
+Intermittent sources (scanner / SDR audio that is silent for long periods) need a high `source_timeout`. The previous default of 10 seconds caused Icecast to disconnect idle sources with `Disconnecting source … due to socket timeout`.
 
 ## Source client example (ffmpeg)
 

@@ -61,6 +61,12 @@ LOCATION=$(bashio::config 'location')
 ADMIN=$(bashio::config 'admin')
 MAX_CLIENTS=$(bashio::config 'max_clients')
 MAX_SOURCES=$(bashio::config 'max_sources')
+SOURCE_TIMEOUT=$(bashio::config 'source_timeout')
+
+# Keep intermittent sources (e.g. SDRTrunk) connected during long silence
+if ! bashio::config.has_value 'source_timeout' || [[ -z "${SOURCE_TIMEOUT}" ]] || [[ "${SOURCE_TIMEOUT}" -lt 1 ]]; then
+    SOURCE_TIMEOUT=86400
+fi
 
 SOURCE_PASSWORD_XML=$(xml_escape "${SOURCE_PASSWORD}")
 RELAY_PASSWORD_XML=$(xml_escape "${RELAY_PASSWORD}")
@@ -112,7 +118,7 @@ cat > /data/icecast.xml <<EOF
         <queue-size>524288</queue-size>
         <client-timeout>30</client-timeout>
         <header-timeout>15</header-timeout>
-        <source-timeout>10</source-timeout>
+        <source-timeout>${SOURCE_TIMEOUT}</source-timeout>
         <burst-on-connect>1</burst-on-connect>
         <burst-size>65535</burst-size>
     </limits>
