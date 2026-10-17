@@ -20,5 +20,3 @@ git config core.hooksPath .githooks
 Commits that stage add-on image sources (`Dockerfile`, `app/`, `rootfs/`, `config.yaml`) run this build test automatically.
 
 Cursor agents are also gated by `.cursor/hooks.json` on `git commit`.
-
-CI runs the same script via `.github/workflows/addon-build.yml`.

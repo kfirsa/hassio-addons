@@ -25,4 +25,4 @@ Build-test add-on images before committing (requires Docker):
 git config core.hooksPath .githooks   # once — runs the build test on commit
 ```
 
-See [`scripts/README.md`](scripts/README.md). CI runs the same check via GitHub Actions.
+See [`scripts/README.md`](scripts/README.md).
