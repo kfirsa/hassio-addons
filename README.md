@@ -22,7 +22,6 @@ Build-test add-on images before committing (requires Docker):
 
 ```bash
 ./scripts/test-addon-build.sh audio_cast_bridge
-git config core.hooksPath .githooks   # once — runs the build test on commit
 ```
 
 See [`scripts/README.md`](scripts/README.md).
