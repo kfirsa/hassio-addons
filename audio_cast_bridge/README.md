@@ -10,10 +10,9 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on
 - Pick eligible speakers in Ingress; changing selection **restarts and applies** immediately (default max **2** bridges)
 - Supports **WiiM**, **LinkPlay**, and **DLNA DMR** media players
 - Skips devices that already have **native Google Cast**
-- Cast target name: `{friendly_name} (Audio Cast Bridge)`
+- Cast target name: `{friendly_name} (Audio Cast Bridge)` — advertised on the LAN via **Vibecast**
 - HA `media_player.play_media` + **ffmpeg** HTTP re-stream for stable LAN URLs
 - Ingress UI for device selection, sizing, and health
-- Cast V2 frontend hooks (optional binary at `/usr/local/bin/cast-frontend`)
 
 ## Installation
 
@@ -23,6 +22,15 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on
 3. Start the add-on (requires **host network**)
 4. Open **Web UI** / Ingress
 5. Select eligible devices (up to 2 by default); the add-on restarts and applies automatically
+6. On first start the add-on downloads a **hash-pinned Cast auth bundle** into private add-on data (not stored in git)
+
+After update, look for log lines like:
+
+```text
+Advertising Cast speaker: 'Kitchen Balcony (Audio Cast Bridge)' → media_player.…
+```
+
+Phones may take ~30s for mDNS before the name appears in the Cast picker.
 
 ## Configuration (Supervisor options)
 
@@ -31,11 +39,11 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on
 | `max_bridges` | Hard ceiling on selected devices | `2` |
 | `max_concurrent_streams` | Max simultaneous ffmpeg relays / casts | `2` |
 | `stream_port` | LAN HTTP port for speaker streams | `18080` |
-| `dial_base_port` | Reserved for Cast frontend port allocation | `3100` |
+| `dial_base_port` | Reserved (legacy) | `3100` |
 | `log_level` | `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
+| `certificate_path` | Optional absolute path to a local BYO auth bundle | empty |
 
-Device selection is stored under add-on `/data` (not in Supervisor options) so the
-list can stay dynamic.
+Device selection is stored under add-on `/data` (not in Supervisor options).
 
 ### RAM estimate (configure time)
 
@@ -45,27 +53,25 @@ suggested_ram_mb = 128 + (N_selected × 12) + (max_concurrent_streams × 48)
 
 The Ingress UI shows this and a recommended host free-RAM band.
 
-## Cast V2 frontend
+## Cast V2 (Vibecast)
 
-Full LAN Cast advertisement needs a **Vibecast / Cast Audio Receiver Lab–compatible**
-binary installed as `CAST_FRONTEND_BIN` (default `/usr/local/bin/cast-frontend`).
+The image ships the **Vibecast** binary from
+[cast-audio-receiver-lab](https://github.com/Allcrafter1/cast-audio-receiver-lab)
+(`ghcr.io/allcrafter1/cast-audio-receiver:0.6.0-dev29`). Each selected HA entity
+registers as a separate audio Cast receiver over the loopback player bridge.
 
-Without that binary the add-on still provides:
-
-- Eligible device discovery and configure-then-restart flow
-- Stream relay and HA `play_media` control
-- Health APIs
-
-Cast authentication used by experimental receivers can be **revoked or broken** by
-Google at any time. Treat this add-on as experimental.
+Cast authentication uses a separately released experimental bundle (downloaded
+once). Google can revoke or change sender acceptance at any time. Treat this
+add-on as experimental.
 
 ## Architecture
 
 ```text
 YouTube Music / Cast sender
-        │  Cast V2 (when frontend binary present)
+        │  Cast V2 (Vibecast + mDNS)
         ▼
 Audio Cast Bridge manager
+        ├── player-protocol adapters (one per speaker)
         ├── ffmpeg HTTP re-stream (:stream_port)
         └── Home Assistant API → LinkPlay / DLNA media_player
 ```
@@ -74,4 +80,5 @@ Audio Cast Bridge manager
 
 - **Host network** is required for Cast/mDNS and for speakers to fetch streams
 - Google Home speaker groups and Spotify Cast are out of scope
-- New LinkPlay/DLNA devices do not auto-join; reconfigure and restart
+- New LinkPlay/DLNA devices do not auto-join; change selection (auto-restarts)
+- Auth bundle provenance: [cast-audio-receiver-bundles](https://github.com/Allcrafter1/cast-audio-receiver-bundles)

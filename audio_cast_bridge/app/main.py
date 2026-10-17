@@ -50,6 +50,8 @@ class AppState:
         self.cast = CastRouteManager(
             on_load=self.handle_cast_load,
             on_stop=self.handle_cast_stop,
+            on_control=self.handle_cast_control,
+            status_provider=self.cast_status_provider,
         )
         self.cast.set_player_ids(load_player_ids())
         self.entity_meta: dict[str, dict[str, Any]] = {}
@@ -81,6 +83,42 @@ class AppState:
         route = self.cast.runtime.routes.get(entity_id)
         if route:
             route.casting = False
+
+    async def handle_cast_control(
+        self, entity_id: str, command: str, params: dict[str, Any]
+    ) -> None:
+        if not self.ha:
+            return
+        try:
+            if command == "play":
+                await self.ha.media_play(entity_id)
+            elif command == "pause":
+                await self.ha.media_pause(entity_id)
+            elif command == "seek":
+                await self.ha.media_seek(entity_id, float(params.get("position") or 0.0))
+            elif command == "volume":
+                level = float(params.get("level") or 1.0)
+                muted = bool(params.get("muted", False))
+                await self.ha.volume_set(entity_id, level)
+                await self.ha.volume_mute(entity_id, muted)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("cast control %s failed for %s: %s", command, entity_id, exc)
+
+    async def cast_status_provider(self, entity_id: str) -> dict[str, Any]:
+        if not self.ha:
+            return {"state": "unknown", "attributes": {}}
+        try:
+            states = await self.ha.get_states()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("status poll failed: %s", exc)
+            return {"state": "unknown", "attributes": {}}
+        for item in states:
+            if item.get("entity_id") == entity_id:
+                return {
+                    "state": item.get("state") or "unknown",
+                    "attributes": item.get("attributes") or {},
+                }
+        return {"state": "unavailable", "attributes": {}}
 
     async def refresh_entities(self) -> dict[str, Any]:
         assert self.ha

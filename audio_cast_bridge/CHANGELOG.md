@@ -2,6 +2,14 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.0
+
+- Ship Vibecast Cast frontend (from cast-audio-receiver-lab `0.6.0-dev29`) so selected speakers advertise on the LAN
+- First-start hash-pinned auth bundle download into `/data/private`
+- Per-speaker player-protocol bridge → HA `play_media` / controls
+- Switch image base to Debian bookworm (glibc) so Vibecast runs
+- Ingress banner shows advertisement status
+
 ## 1.0.7
 
 - Log each Cast target by name on start (e.g. `Kitchen Balcony (Audio Cast Bridge)`)

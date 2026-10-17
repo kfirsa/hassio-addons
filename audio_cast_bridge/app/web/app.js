@@ -116,6 +116,31 @@ async function loadHealth() {
   const res = await fetch("api/health");
   const data = await res.json();
   $("health").textContent = JSON.stringify(data, null, 2);
+  const cast = data.cast || {};
+  const banner = $("cast-banner");
+  if (!banner) return;
+  if (!cast.frontend_available) {
+    banner.textContent = "Cast frontend binary missing — phones will not see Audio Cast Bridge speakers.";
+    banner.classList.remove("hidden");
+  } else if (!cast.auth_bundle_present) {
+    banner.textContent = "Cast auth bundle not ready — LAN advertisement disabled until first-start download succeeds.";
+    banner.classList.remove("hidden");
+  } else if (!cast.frontend_running || !cast.bridge_ready) {
+    banner.textContent = "Cast frontend is not ready yet — waiting for Vibecast / player bridge.";
+    banner.classList.remove("hidden");
+  } else {
+    const routes = cast.routes || [];
+    const adv = routes.filter(function (r) { return r.advertised; }).map(function (r) { return r.cast_name; });
+    if (routes.length && !adv.length) {
+      banner.textContent = "Routes configured but not yet advertised on the LAN.";
+      banner.classList.remove("hidden");
+    } else if (adv.length) {
+      banner.textContent = "Advertising on LAN: " + adv.join(", ");
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
 }
 
 async function applySelection() {

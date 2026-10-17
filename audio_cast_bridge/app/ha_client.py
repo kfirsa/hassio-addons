@@ -229,6 +229,13 @@ class HomeAssistantClient:
     async def media_stop(self, entity_id: str) -> None:
         await self.call_service("media_player", "media_stop", {"entity_id": entity_id})
 
+    async def media_seek(self, entity_id: str, position: float) -> None:
+        await self.call_service(
+            "media_player",
+            "media_seek",
+            {"entity_id": entity_id, "seek_position": max(0.0, float(position))},
+        )
+
     async def volume_set(self, entity_id: str, volume: float) -> None:
         await self.call_service(
             "media_player",
