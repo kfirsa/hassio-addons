@@ -8,6 +8,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on
 ## Features
 
 - **Configure → restart → apply**: pick eligible HA media players, review RAM estimate, save, restart add-on
+- Supports **WiiM**, **LinkPlay**, and **DLNA DMR** media players
 - Skips devices that already have **native Google Cast**
 - Cast target name: `{friendly_name} (Audio Cast Bridge)`
 - HA `media_player.play_media` + **ffmpeg** HTTP re-stream for stable LAN URLs

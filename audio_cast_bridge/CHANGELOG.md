@@ -2,6 +2,12 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.0.4
+
+- Discover speakers via entity-registry WebSocket (fixes empty lists when templates return nothing)
+- Treat official **wiim** integration as eligible (WiiM/LinkPlay-family), alongside linkplay and dlna_dmr
+- Show all media_player platform counts in the UI for debugging
+
 ## 1.0.3
 
 - Fix eligible device discovery: resolve LinkPlay/DLNA/Cast via `integration_entities()` (state attributes do not expose platform)

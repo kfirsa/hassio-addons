@@ -12,9 +12,13 @@ import aiohttp
 
 LOGGER = logging.getLogger("acb.ha")
 
-ELIGIBLE_DOMAINS = frozenset({"linkplay", "dlna_dmr"})
+# Integrations that can receive a LAN HTTP stream via media_player.play_media
+ELIGIBLE_DOMAINS = frozenset({
+    "linkplay",
+    "wiim",       # official WiiM / LinkPlay-family core integration
+    "dlna_dmr",
+})
 CAST_DOMAIN = "cast"
-# Domains we care about for bridging / skip logic
 TRACKED_DOMAINS = frozenset({*ELIGIBLE_DOMAINS, CAST_DOMAIN})
 
 
@@ -52,6 +56,14 @@ class HomeAssistantClient:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
+    def _ws_url(self) -> str:
+        base = self.base_url
+        if base.startswith("https://"):
+            return "wss://" + base[len("https://") :] + "/api/websocket"
+        if base.startswith("http://"):
+            return "ws://" + base[len("http://") :] + "/api/websocket"
+        return "ws://" + base + "/api/websocket"
+
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         if self._session is None:
             raise RuntimeError("HomeAssistantClient session is not started")
@@ -77,52 +89,54 @@ class HomeAssistantClient:
         data = await self._request("GET", "/api/config/config_entries/entry")
         return data if isinstance(data, list) else []
 
-    async def render_template(self, template: str) -> str:
-        """Render a Jinja template via the HA REST API."""
-        data = await self._request("POST", "/api/template", json={"template": template})
-        if isinstance(data, str):
-            return data
-        return str(data)
-
-    async def integration_entity_ids(self, domain: str) -> list[str]:
-        """Entity IDs belonging to an integration (via integration_entities())."""
-        # tojson keeps quoting predictable for json.loads
-        template = (
-            "{{ integration_entities('"
-            + domain.replace("'", "")
-            + "') | list | tojson }}"
-        )
-        raw = (await self.render_template(template)).strip()
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            LOGGER.warning("Could not parse integration_entities(%s): %r", domain, raw[:200])
-            return []
-        if not isinstance(parsed, list):
-            return []
-        return [str(x) for x in parsed if isinstance(x, str)]
+    async def entity_registry_list(self) -> list[dict[str, Any]]:
+        """Fetch entity registry via WebSocket (includes integration platform)."""
+        if self._session is None:
+            raise RuntimeError("HomeAssistantClient session is not started")
+        ws_url = self._ws_url()
+        LOGGER.debug("Connecting to HA websocket %s", ws_url)
+        async with self._session.ws_connect(ws_url, heartbeat=30) as ws:
+            msg = await ws.receive_json()
+            if msg.get("type") != "auth_required":
+                raise RuntimeError(f"Unexpected WS hello: {msg!r}")
+            await ws.send_json({"type": "auth", "access_token": self.token})
+            auth = await ws.receive_json()
+            if auth.get("type") != "auth_ok":
+                raise RuntimeError(f"HA websocket auth failed: {auth!r}")
+            await ws.send_json({"id": 1, "type": "config/entity_registry/list"})
+            while True:
+                resp = await ws.receive_json()
+                if resp.get("id") != 1:
+                    continue
+                if not resp.get("success"):
+                    raise RuntimeError(f"entity_registry/list failed: {resp!r}")
+                result = resp.get("result")
+                if isinstance(result, list):
+                    return result
+                raise RuntimeError(f"Unexpected entity_registry result type: {type(result)}")
 
     async def platforms_for_media_players(self) -> dict[str, str]:
-        """Map media_player entity_id -> integration platform/domain.
-
-        State attributes do not expose config_entry_id/platform. Use
-        integration_entities() for known domains (reliable with homeassistant_api).
-        """
+        """Map media_player entity_id -> integration platform (e.g. wiim, dlna_dmr)."""
         mapping: dict[str, str] = {}
-        for domain in sorted(TRACKED_DOMAINS):
-            try:
-                entity_ids = await self.integration_entity_ids(domain)
-            except Exception as exc:  # noqa: BLE001
-                LOGGER.warning("integration_entities(%s) failed: %s", domain, exc)
+        entries = await self.entity_registry_list()
+        for entry in entries:
+            if not isinstance(entry, dict):
                 continue
-            for entity_id in entity_ids:
-                if entity_id.startswith("media_player."):
-                    mapping[entity_id] = domain
-            LOGGER.info(
-                "Discovered %s media_player(s) for integration %s",
-                sum(1 for e in entity_ids if e.startswith("media_player.")),
-                domain,
-            )
+            entity_id = str(entry.get("entity_id") or "")
+            if not entity_id.startswith("media_player."):
+                continue
+            # Entity registry: domain = component (media_player), platform = integration
+            platform = entry.get("platform") or entry.get("pl")
+            if isinstance(platform, str) and platform:
+                mapping[entity_id] = platform
+        counts: dict[str, int] = {}
+        for platform in mapping.values():
+            counts[platform] = counts.get(platform, 0) + 1
+        LOGGER.info(
+            "Entity registry: %s media_player platforms: %s",
+            len(mapping),
+            dict(sorted(counts.items())),
+        )
         return mapping
 
     async def call_service(
@@ -188,6 +202,7 @@ def classify_media_players(
     cast_entity_ids: set[str] = set()
     players: list[dict[str, Any]] = []
     media_player_total = 0
+    platform_counts: dict[str, int] = {}
 
     for state in states:
         entity_id = str(state.get("entity_id") or "")
@@ -197,20 +212,14 @@ def classify_media_players(
         attrs = state.get("attributes") or {}
         if not isinstance(attrs, dict):
             attrs = {}
-        domain = platform_by_entity.get(entity_id, "")
-        # Soft fallbacks (rarely present on state)
-        if not domain:
-            entry_hint = attrs.get("config_entry_id") or attrs.get("entry_id")
-            if isinstance(attrs.get("platform"), str):
-                domain = attrs["platform"]
-            elif entry_hint:
-                domain = "unknown"
+        domain = platform_by_entity.get(entity_id, "unknown")
+        platform_counts[domain] = platform_counts.get(domain, 0) + 1
         ip = _ip_from_attributes(attrs)
         item = {
             "entity_id": entity_id,
             "friendly_name": attrs.get("friendly_name") or entity_id,
             "state": state.get("state"),
-            "domain": domain or "unknown",
+            "domain": domain,
             "ip_address": ip,
             "cast_name": f"{attrs.get('friendly_name') or entity_id} (Audio Cast Bridge)",
         }
@@ -242,10 +251,11 @@ def classify_media_players(
         "cast_entity_ids": sorted(cast_entity_ids),
         "diagnostics": {
             "media_player_total": media_player_total,
+            "eligible_domains": sorted(ELIGIBLE_DOMAINS),
             "tracked_platforms": {
-                domain: sum(1 for d in platform_by_entity.values() if d == domain)
-                for domain in sorted(TRACKED_DOMAINS)
+                domain: platform_counts.get(domain, 0) for domain in sorted(TRACKED_DOMAINS)
             },
+            "all_platforms": dict(sorted(platform_counts.items())),
             "platform_mapped": len(platform_by_entity),
         },
     }

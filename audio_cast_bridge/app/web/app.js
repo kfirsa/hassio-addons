@@ -36,7 +36,7 @@ function escapeHtml(s) {
 function renderList(eligible, skipped) {
   const el = $("eligible");
   if (!eligible.length) {
-    el.innerHTML = '<p class="hint">No eligible LinkPlay/DLNA media_player entities found. Ensure LinkPlay or DLNA DMR integrations are set up, then refresh. Check counts below.</p>';
+    el.innerHTML = '<p class="hint">No eligible speakers found. Looking for wiim / linkplay / dlna_dmr. See platform counts below.</p>';
   } else {
     el.innerHTML = eligible.map(function (d) {
       return (
@@ -76,11 +76,15 @@ async function loadDevices() {
   renderList(data.eligible || [], data.skipped || []);
   const diag = data.diagnostics || {};
   const tracked = diag.tracked_platforms || {};
+  const all = diag.all_platforms || {};
+  const allParts = Object.keys(all).map(function (k) { return k + "=" + all[k]; }).join(", ");
   $("diag").textContent =
     "HA media_players: " + (diag.media_player_total ?? "?") +
+    " · wiim: " + (tracked.wiim ?? 0) +
     " · linkplay: " + (tracked.linkplay ?? 0) +
     " · dlna_dmr: " + (tracked.dlna_dmr ?? 0) +
-    " · cast: " + (tracked.cast ?? 0);
+    " · cast: " + (tracked.cast ?? 0) +
+    (allParts ? " · platforms: " + allParts : "");
   const cfg = data.config || {};
   const pending = cfg.pending || cfg.committed || {};
   if (pending.max_concurrent_streams) {
