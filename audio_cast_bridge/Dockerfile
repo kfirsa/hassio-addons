@@ -2,22 +2,18 @@ ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8 \
-    ADDON_VERSION=1.0.1 \
+    ADDON_VERSION=1.0.2 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     CAST_FRONTEND_BIN=/usr/local/bin/cast-frontend \
     ACB_APP_DIR=/opt/audio_cast_bridge
 
-# Runtime tools: Python manager, ffmpeg relay, optional yt-dlp extract path
+# Use Alpine packages only — pip wheels for aiohttp fail on Python 3.14 without a C toolchain.
 RUN \
     apk add --no-cache \
         python3 \
-        py3-pip \
+        py3-aiohttp \
         ffmpeg \
-        yt-dlp \
-    && python3 -m pip install --break-system-packages --no-cache-dir \
-        aiohttp==3.11.18 \
-        yarl==1.20.0
+        yt-dlp
 
 COPY app/ ${ACB_APP_DIR}/
 COPY rootfs /

@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.0.2
+
+- Fix Docker build: install `py3-aiohttp` via apk instead of pip (Python 3.14 has no aiohttp wheel without a compiler)
+
 ## 1.0.1
 
 - Add store `icon.png` / `logo.png` using Material `music_cast` glyph
