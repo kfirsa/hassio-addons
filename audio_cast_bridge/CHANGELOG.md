@@ -2,6 +2,11 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.0.5
+
+- Fix template fallback parsing: HA returns Python list repr (`['a','b']`), not JSON
+- Keep entity-registry WebSocket as primary discovery
+
 ## 1.0.4
 
 - Discover speakers via entity-registry WebSocket (fixes empty lists when templates return nothing)

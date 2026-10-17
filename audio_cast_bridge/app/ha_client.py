@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -20,6 +21,33 @@ ELIGIBLE_DOMAINS = frozenset({
 })
 CAST_DOMAIN = "cast"
 TRACKED_DOMAINS = frozenset({*ELIGIBLE_DOMAINS, CAST_DOMAIN})
+
+
+def parse_entity_id_list(raw: str) -> list[str]:
+    """Parse HA template output that may be JSON or Python list repr."""
+    s = (raw or "").strip()
+    if not s:
+        return []
+    # Strip wrapping quotes if the whole payload was stringified twice
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        try:
+            s = ast.literal_eval(s)
+            if isinstance(s, str):
+                s = s.strip()
+            else:
+                s = str(s)
+        except (SyntaxError, ValueError):
+            pass
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(s)
+        except (json.JSONDecodeError, SyntaxError, ValueError):
+            continue
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed if isinstance(x, str)]
+    LOGGER.warning("Could not parse entity id list: %r", raw[:240])
+    return []
+
 
 
 class HomeAssistantClient:
@@ -115,28 +143,59 @@ class HomeAssistantClient:
                     return result
                 raise RuntimeError(f"Unexpected entity_registry result type: {type(result)}")
 
+    async def integration_entity_ids(self, domain: str) -> list[str]:
+        """Entity IDs for an integration via template (fallback path)."""
+        template = (
+            "{{ integration_entities('"
+            + domain.replace("'", "")
+            + "') | list }}"
+        )
+        raw = await self.render_template(template)
+        return parse_entity_id_list(raw)
+
     async def platforms_for_media_players(self) -> dict[str, str]:
         """Map media_player entity_id -> integration platform (e.g. wiim, dlna_dmr)."""
         mapping: dict[str, str] = {}
-        entries = await self.entity_registry_list()
-        for entry in entries:
-            if not isinstance(entry, dict):
+
+        # Preferred: entity registry over WebSocket (has platform field)
+        try:
+            entries = await self.entity_registry_list()
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                entity_id = str(entry.get("entity_id") or "")
+                if not entity_id.startswith("media_player."):
+                    continue
+                platform = entry.get("platform") or entry.get("pl")
+                if isinstance(platform, str) and platform:
+                    mapping[entity_id] = platform
+            if mapping:
+                counts: dict[str, int] = {}
+                for platform in mapping.values():
+                    counts[platform] = counts.get(platform, 0) + 1
+                LOGGER.info(
+                    "Entity registry: %s media_player platforms: %s",
+                    len(mapping),
+                    dict(sorted(counts.items())),
+                )
+                return mapping
+            LOGGER.warning("Entity registry returned no media_player platforms; trying templates")
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Entity registry discovery failed (%s); trying templates", exc)
+
+        # Fallback: integration_entities() template (HA may return Python list repr)
+        for domain in sorted(TRACKED_DOMAINS):
+            try:
+                entity_ids = await self.integration_entity_ids(domain)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("integration_entities(%s) failed: %s", domain, exc)
                 continue
-            entity_id = str(entry.get("entity_id") or "")
-            if not entity_id.startswith("media_player."):
-                continue
-            # Entity registry: domain = component (media_player), platform = integration
-            platform = entry.get("platform") or entry.get("pl")
-            if isinstance(platform, str) and platform:
-                mapping[entity_id] = platform
-        counts: dict[str, int] = {}
-        for platform in mapping.values():
-            counts[platform] = counts.get(platform, 0) + 1
-        LOGGER.info(
-            "Entity registry: %s media_player platforms: %s",
-            len(mapping),
-            dict(sorted(counts.items())),
-        )
+            n = 0
+            for entity_id in entity_ids:
+                if entity_id.startswith("media_player."):
+                    mapping[entity_id] = domain
+                    n += 1
+            LOGGER.info("Template discovery: %s media_player(s) for %s", n, domain)
         return mapping
 
     async def call_service(
