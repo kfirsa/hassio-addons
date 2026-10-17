@@ -6,6 +6,7 @@ retain their own licenses (e.g. MIT / MPL-2.0) and attribution requirements.
 
 - [cast-audio-receiver-lab](https://github.com/Allcrafter1/cast-audio-receiver-lab)
 - ffmpeg, yt-dlp, aiohttp — see their upstream licenses
+- Store/Ingress logo uses Google's Material Symbol `music_cast` (Apache-2.0)
 
 Original Audio Cast Bridge manager code in this repository is provided under the
 same license as the hassio-addons repository (`LICENSE` at repo root) unless noted.

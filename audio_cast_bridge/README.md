@@ -3,8 +3,7 @@
 Experimental Home Assistant add-on that bridges **YouTube Music / Cast audio** to
 **LinkPlay** and **DLNA** speakers that do not have native Google Cast.
 
-Version **1.0.0**. See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by
-Home Assistant on update).
+See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on update).
 
 ## Features
 
@@ -55,7 +54,7 @@ Without that binary the add-on still provides:
 
 - Eligible device discovery and configure-then-restart flow
 - Stream relay and HA `play_media` control
-- Health / version APIs
+- Health APIs
 
 Cast authentication used by experimental receivers can be **revoked or broken** by
 Google at any time. Treat this add-on as experimental.
@@ -70,12 +69,6 @@ Audio Cast Bridge manager
         ├── ffmpeg HTTP re-stream (:stream_port)
         └── Home Assistant API → LinkPlay / DLNA media_player
 ```
-
-## Versioning
-
-- `config.yaml` `version` is the Supervisor update source of truth
-- `CHANGELOG.md` must gain a matching `## X.Y.Z` section on every bump
-- Health API and Ingress footer expose `addon_version`
 
 ## Notes
 

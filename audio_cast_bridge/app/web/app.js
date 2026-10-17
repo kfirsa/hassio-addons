@@ -80,9 +80,6 @@ async function loadDevices() {
     $("max_streams").value = pending.max_concurrent_streams;
   }
   $("restart-banner").classList.toggle("hidden", !cfg.needs_restart);
-  const committedCount = ((cfg.committed && cfg.committed.selected_entities) || []).length;
-  $("version").textContent =
-    "Add-on v" + (cfg.addon_version || "?") + " · committed " + committedCount + " bridge(s)";
   renderSizing();
 }
 

@@ -2,7 +2,7 @@ ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8 \
-    ADDON_VERSION=1.0.0 \
+    ADDON_VERSION=1.0.1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     CAST_FRONTEND_BIN=/usr/local/bin/cast-frontend \
