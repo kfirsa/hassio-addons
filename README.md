@@ -15,3 +15,14 @@ HA Add-ons by kfirsa.
 1. In Home Assistant go to **Settings** → **Add-ons** → **Add-on Store** → **Repositories**
 2. Add: `https://github.com/kfirsa/hassio-addons`
 3. Install the add-on you want from the store
+
+## Development
+
+Build-test add-on images before committing (requires Docker):
+
+```bash
+./scripts/test-addon-build.sh audio_cast_bridge
+git config core.hooksPath .githooks   # once — runs the build test on commit
+```
+
+See [`scripts/README.md`](scripts/README.md). CI runs the same check via GitHub Actions.

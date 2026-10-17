@@ -1,5 +1,8 @@
 # Cursor
 .cursor/
+!.cursor/hooks.json
+!.cursor/hooks/
+!.cursor/hooks/**
 .cursorrules
 .cursorignore
 
