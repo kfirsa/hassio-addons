@@ -2,6 +2,11 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.0.7
+
+- Log each Cast target by name on start (e.g. `Kitchen Balcony (Audio Cast Bridge)`)
+- Warn clearly when the Cast V2 frontend binary is missing so LAN advertisement is inactive
+
 ## 1.0.6
 
 - Apply speaker selection immediately: changing checkboxes restarts the add-on (no Save step)

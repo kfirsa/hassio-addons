@@ -78,10 +78,19 @@ class CastRouteManager:
         entity_meta: dict[str, dict[str, Any]],
     ) -> list[CastRoute]:
         """Replace route table from committed selection (call on start)."""
+        if not selected_entities:
+            LOGGER.warning(
+                "No speakers selected — no Cast targets will be created. "
+                "Pick devices in the Ingress UI (selection restarts the add-on)."
+            )
+            self.runtime.routes = {}
+            return []
+
         new_routes: dict[str, CastRoute] = {}
         for entity_id in selected_entities:
             meta = entity_meta.get(entity_id) or {}
             friendly = str(meta.get("friendly_name") or entity_id)
+            cast_name = f"{friendly}{CAST_NAME_SUFFIX}"
             player_id = stable_player_id(entity_id, self._player_ids)
             self._player_ids[entity_id] = player_id
             state = str(meta.get("state") or "unknown")
@@ -89,13 +98,21 @@ class CastRouteManager:
             new_routes[entity_id] = CastRoute(
                 entity_id=entity_id,
                 friendly_name=friendly,
-                cast_name=f"{friendly}{CAST_NAME_SUFFIX}",
+                cast_name=cast_name,
                 player_id=player_id,
                 available=available,
             )
+            LOGGER.info(
+                "Cast target created: %r -> %s (player_id=%s available=%s state=%s)",
+                cast_name,
+                entity_id,
+                player_id,
+                available,
+                state,
+            )
         self.runtime.routes = new_routes
         LOGGER.info(
-            "Provisioned %s Cast routes (frontend_bin=%s available=%s)",
+            "Provisioned %s Cast target(s) (frontend_bin=%s binary_present=%s)",
             len(new_routes),
             self.runtime.frontend_bin,
             self.runtime.frontend_available,
@@ -137,10 +154,15 @@ class CastRouteManager:
 
     async def start_frontend(self) -> None:
         if not self.runtime.frontend_available:
+            names = [r.cast_name for r in self.runtime.routes.values()]
             LOGGER.warning(
                 "Cast V2 frontend binary not found at %s — "
-                "configure UI and HA relay work; LAN Cast advertisement disabled until binary is pinned in the image",
+                "%s Cast target(s) are registered in the manager but NOT advertised on the LAN "
+                "(YouTube Music will not see them until the frontend binary is installed). "
+                "Targets: %s",
                 self.runtime.frontend_bin,
+                len(names),
+                names or "(none)",
             )
             return
         if self.runtime.process and self.runtime.process.returncode is None:
