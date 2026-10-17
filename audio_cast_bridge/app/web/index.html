@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Audio Cast Bridge</title>
+  <link rel="stylesheet" href="static/style.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>Audio Cast Bridge</h1>
+      <p class="sub">Select LinkPlay / DLNA speakers, review RAM estimate, save, then <strong>restart the add-on</strong> to apply.</p>
+      <p id="version" class="meta"></p>
+    </header>
+
+    <section id="restart-banner" class="banner hidden" role="status">
+      Configuration saved. <strong>Restart this add-on</strong> to provision Cast bridges.
+    </section>
+
+    <section class="card">
+      <h2>Eligible devices</h2>
+      <p class="hint">Devices with native Google Cast are listed separately and cannot be selected.</p>
+      <div id="eligible" class="list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Skipped (native Cast)</h2>
+      <div id="skipped" class="list muted"></div>
+    </section>
+
+    <section class="card">
+      <h2>Provisioning</h2>
+      <label class="row">
+        <span>Max concurrent streams</span>
+        <input type="number" id="max_streams" min="1" max="8" value="2" />
+      </label>
+      <div id="sizing" class="sizing"></div>
+      <p class="hint formula">RAM ≈ 128 + (N × 12) + (streams × 48) MB</p>
+      <div class="actions">
+        <button type="button" id="save">Save configuration</button>
+        <button type="button" id="reload" class="secondary">Refresh devices</button>
+      </div>
+      <p id="message" class="message"></p>
+    </section>
+
+    <section class="card">
+      <h2>Committed routes (active after last restart)</h2>
+      <pre id="health" class="health"></pre>
+    </section>
+  </main>
+  <script src="static/app.js"></script>
+</body>
+</html>

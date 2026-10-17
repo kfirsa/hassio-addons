@@ -1,0 +1,15 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start Audio Cast Bridge manager
+# ==============================================================================
+set -e
+
+if [[ -f /data/acb.env ]]; then
+    # shellcheck disable=SC1091
+    source /data/acb.env
+fi
+
+export PYTHONPATH="/opt/audio_cast_bridge:${PYTHONPATH:-}"
+
+bashio::log.info "Starting Audio Cast Bridge manager (Ingress :8099, streams :${ACB_STREAM_PORT:-18080})..."
+exec python3 /opt/audio_cast_bridge/main.py

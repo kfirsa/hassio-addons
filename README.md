@@ -6,6 +6,7 @@ HA Add-ons by kfirsa.
 
 | Add-on | Description |
 |--------|-------------|
+| [Audio Cast Bridge](audio_cast_bridge/) | Cast V2 bridge for LinkPlay/DLNA speakers without native Google Cast |
 | [Extended CUPS Print Server](extended_cups/) | CUPS print server with USB/network printers and thermal drivers |
 | [Icecast](icecast/) | Icecast streaming server with Home Assistant Ingress admin UI |
 

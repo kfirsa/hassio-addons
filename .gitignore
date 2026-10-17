@@ -1,0 +1,9 @@
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
