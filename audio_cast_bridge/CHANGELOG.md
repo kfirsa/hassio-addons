@@ -2,6 +2,11 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.0.6
+
+- Apply speaker selection immediately: changing checkboxes restarts the add-on (no Save step)
+- Default `max_bridges` / concurrent streams = **2**
+
 ## 1.0.5
 
 - Fix template fallback parsing: HA returns Python list repr (`['a','b']`), not JSON

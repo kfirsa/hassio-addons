@@ -1,5 +1,9 @@
 const $ = (id) => document.getElementById(id);
 
+let applyTimer = null;
+let applying = false;
+let suppressChange = false;
+
 function estimateRam(n, streams) {
   return 128 + n * 12 + streams * 48;
 }
@@ -33,6 +37,20 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;");
 }
 
+function scheduleApply() {
+  if (suppressChange || applying) return;
+  renderSizing();
+  if (applyTimer) clearTimeout(applyTimer);
+  applyTimer = setTimeout(function () {
+    applySelection().catch(function (err) {
+      $("message").textContent = String(err);
+      $("message").classList.add("error");
+      applying = false;
+      $("restart-banner").classList.add("hidden");
+    });
+  }, 600);
+}
+
 function renderList(eligible, skipped) {
   const el = $("eligible");
   if (!eligible.length) {
@@ -64,7 +82,7 @@ function renderList(eligible, skipped) {
     }).join("");
   }
   el.querySelectorAll('input[name="entity"]').forEach(function (input) {
-    input.addEventListener("change", renderSizing);
+    input.addEventListener("change", scheduleApply);
   });
   renderSizing();
 }
@@ -73,6 +91,7 @@ async function loadDevices() {
   const res = await fetch("api/devices");
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
+  suppressChange = true;
   renderList(data.eligible || [], data.skipped || []);
   const diag = data.diagnostics || {};
   const tracked = diag.tracked_platforms || {};
@@ -85,13 +104,12 @@ async function loadDevices() {
     " · dlna_dmr: " + (tracked.dlna_dmr ?? 0) +
     " · cast: " + (tracked.cast ?? 0) +
     (allParts ? " · platforms: " + allParts : "");
-  const cfg = data.config || {};
-  const pending = cfg.pending || cfg.committed || {};
-  if (pending.max_concurrent_streams) {
-    $("max_streams").value = pending.max_concurrent_streams;
+  const cfg = ((data.config || {}).config) || {};
+  if (cfg.max_concurrent_streams) {
+    $("max_streams").value = cfg.max_concurrent_streams;
   }
-  $("restart-banner").classList.toggle("hidden", !cfg.needs_restart);
   renderSizing();
+  suppressChange = false;
 }
 
 async function loadHealth() {
@@ -100,9 +118,12 @@ async function loadHealth() {
   $("health").textContent = JSON.stringify(data, null, 2);
 }
 
-async function saveConfig() {
+async function applySelection() {
+  if (applying) return;
+  applying = true;
   $("message").textContent = "";
   $("message").classList.remove("error");
+  $("restart-banner").classList.remove("hidden");
   const body = {
     selected_entities: selectedIds(),
     max_concurrent_streams: Number($("max_streams").value || 2),
@@ -114,23 +135,28 @@ async function saveConfig() {
   });
   const data = await res.json();
   if (!res.ok) {
-    $("message").textContent = data.error || "Save failed";
+    applying = false;
+    $("restart-banner").classList.add("hidden");
+    $("message").textContent = data.error || "Apply failed";
     $("message").classList.add("error");
     return;
   }
-  $("message").textContent = data.message || "Saved";
-  $("restart-banner").classList.remove("hidden");
-  await loadDevices();
-  await loadHealth();
+  $("message").textContent = data.message || "Restarting…";
+  // UI will drop while the add-on restarts; poll until it returns
+  setTimeout(function poll() {
+    fetch("api/health")
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function () {
+        applying = false;
+        $("restart-banner").classList.add("hidden");
+        $("message").textContent = "Applied.";
+        return Promise.all([loadDevices(), loadHealth()]);
+      })
+      .catch(function () { setTimeout(poll, 1500); });
+  }, 2000);
 }
 
-$("max_streams").addEventListener("input", renderSizing);
-$("save").addEventListener("click", function () {
-  saveConfig().catch(function (err) {
-    $("message").textContent = String(err);
-    $("message").classList.add("error");
-  });
-});
+$("max_streams").addEventListener("change", scheduleApply);
 $("reload").addEventListener("click", function () {
   Promise.all([loadDevices(), loadHealth()]).catch(function (err) {
     $("message").textContent = String(err);

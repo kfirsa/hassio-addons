@@ -7,7 +7,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on
 
 ## Features
 
-- **Configure → restart → apply**: pick eligible HA media players, review RAM estimate, save, restart add-on
+- Pick eligible speakers in Ingress; changing selection **restarts and applies** immediately (default max **2** bridges)
 - Supports **WiiM**, **LinkPlay**, and **DLNA DMR** media players
 - Skips devices that already have **native Google Cast**
 - Cast target name: `{friendly_name} (Audio Cast Bridge)`
@@ -22,14 +22,13 @@ See [`CHANGELOG.md`](CHANGELOG.md) for release notes (shown by Home Assistant on
 2. Install **Audio Cast Bridge**
 3. Start the add-on (requires **host network**)
 4. Open **Web UI** / Ingress
-5. Select eligible devices, set max concurrent streams, review RAM estimate → **Save**
-6. **Restart the add-on** to provision bridges
+5. Select eligible devices (up to 2 by default); the add-on restarts and applies automatically
 
 ## Configuration (Supervisor options)
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `max_bridges` | Hard ceiling on selected devices | `5` |
+| `max_bridges` | Hard ceiling on selected devices | `2` |
 | `max_concurrent_streams` | Max simultaneous ffmpeg relays / casts | `2` |
 | `stream_port` | LAN HTTP port for speaker streams | `18080` |
 | `dial_base_port` | Reserved for Cast frontend port allocation | `3100` |

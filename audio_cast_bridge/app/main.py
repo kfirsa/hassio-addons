@@ -11,14 +11,15 @@ import signal
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from cast_runtime import CastRouteManager
 from config_store import (
     ADDON_VERSION,
-    commit_pending_on_start,
+    load_config,
     load_player_ids,
-    save_pending,
+    save_config,
     save_player_ids,
     status as config_status,
 )
@@ -40,7 +41,7 @@ HOST_HINT = os.environ.get("ACB_HOST_HINT", "homeassistant.local")
 
 class AppState:
     def __init__(self) -> None:
-        self.committed = commit_pending_on_start()
+        self.committed = load_config()
         self.ha: HomeAssistantClient | None = None
         self.relay = StreamRelayHub(
             host_hint=HOST_HINT,
@@ -142,14 +143,28 @@ async def api_health(_: web.Request) -> web.Response:
     )
 
 
+async def restart_addon() -> None:
+    """Ask Supervisor to restart this add-on so the new selection is applied."""
+    token = os.environ.get("SUPERVISOR_TOKEN") or ""
+    url = os.environ.get("ACB_SUPERVISOR_RESTART_URL", "http://supervisor/addons/self/restart")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, headers=headers) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise RuntimeError(f"Supervisor restart failed ({resp.status}): {text[:300]}")
+            LOGGER.info("Supervisor restart requested for this add-on")
+
+
 async def api_devices(_: web.Request) -> web.Response:
     try:
         classified = await STATE.refresh_entities()
     except Exception as exc:  # noqa: BLE001
         return _json({"error": str(exc)}, status=502)
     cfg = config_status()
-    pending = cfg.get("pending") or cfg.get("committed") or {}
-    selected = set(pending.get("selected_entities") or [])
+    active = (cfg.get("config") or {})
+    selected = set(active.get("selected_entities") or [])
     for item in classified["eligible"]:
         item["selected"] = item["entity_id"] in selected
     return _json(
@@ -176,7 +191,7 @@ async def api_config_save(request: web.Request) -> web.Response:
     if not isinstance(selected, list):
         return _json({"error": "selected_entities must be a list"}, status=400)
     try:
-        pending = save_pending(
+        saved = save_config(
             selected_entities=[str(x) for x in selected],
             max_concurrent_streams=body.get("max_concurrent_streams"),
             max_bridges=body.get("max_bridges"),
@@ -184,12 +199,22 @@ async def api_config_save(request: web.Request) -> web.Response:
         )
     except ValueError as exc:
         return _json({"error": str(exc)}, status=400)
+
+    # Restart after response so the UI gets the JSON payload first
+    async def _restart_later() -> None:
+        await asyncio.sleep(0.4)
+        try:
+            await restart_addon()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("Failed to restart add-on after config change: %s", exc)
+
+    asyncio.create_task(_restart_later(), name="acb-restart")
     return _json(
         {
             "ok": True,
-            "needs_restart": True,
-            "pending": pending,
-            "message": "Configuration saved. Restart the add-on to apply bridges.",
+            "restarting": True,
+            "config": saved,
+            "message": "Selection saved. Add-on is restarting to apply.",
         }
     )
 

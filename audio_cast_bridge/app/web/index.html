@@ -13,13 +13,13 @@
         <img class="logo" src="static/logo.png" alt="" width="48" height="48" />
         <div>
           <h1>Audio Cast Bridge</h1>
-          <p class="sub">Select LinkPlay / DLNA speakers, review RAM estimate, save, then <strong>restart the add-on</strong> to apply.</p>
+          <p class="sub">Select up to <strong>2</strong> speakers. Changing the selection restarts the add-on and applies immediately.</p>
         </div>
       </div>
     </header>
 
     <section id="restart-banner" class="banner hidden" role="status">
-      Configuration saved. <strong>Restart this add-on</strong> to provision Cast bridges.
+      Restarting add-on to apply selection…
     </section>
 
     <section class="card">
@@ -41,16 +41,15 @@
         <input type="number" id="max_streams" min="1" max="8" value="2" />
       </label>
       <div id="sizing" class="sizing"></div>
-      <p class="hint formula">RAM ≈ 128 + (N × 12) + (streams × 48) MB</p>
+      <p class="hint formula">RAM ≈ 128 + (N × 12) + (streams × 48) MB · default max bridges = 2</p>
       <div class="actions">
-        <button type="button" id="save">Save configuration</button>
         <button type="button" id="reload" class="secondary">Refresh devices</button>
       </div>
       <p id="message" class="message"></p>
     </section>
 
     <section class="card">
-      <h2>Committed routes (active after last restart)</h2>
+      <h2>Active routes</h2>
       <pre id="health" class="health"></pre>
     </section>
   </main>
