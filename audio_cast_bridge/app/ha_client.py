@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -13,6 +14,8 @@ LOGGER = logging.getLogger("acb.ha")
 
 ELIGIBLE_DOMAINS = frozenset({"linkplay", "dlna_dmr"})
 CAST_DOMAIN = "cast"
+# Domains we care about for bridging / skip logic
+TRACKED_DOMAINS = frozenset({*ELIGIBLE_DOMAINS, CAST_DOMAIN})
 
 
 class HomeAssistantClient:
@@ -74,6 +77,54 @@ class HomeAssistantClient:
         data = await self._request("GET", "/api/config/config_entries/entry")
         return data if isinstance(data, list) else []
 
+    async def render_template(self, template: str) -> str:
+        """Render a Jinja template via the HA REST API."""
+        data = await self._request("POST", "/api/template", json={"template": template})
+        if isinstance(data, str):
+            return data
+        return str(data)
+
+    async def integration_entity_ids(self, domain: str) -> list[str]:
+        """Entity IDs belonging to an integration (via integration_entities())."""
+        # tojson keeps quoting predictable for json.loads
+        template = (
+            "{{ integration_entities('"
+            + domain.replace("'", "")
+            + "') | list | tojson }}"
+        )
+        raw = (await self.render_template(template)).strip()
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            LOGGER.warning("Could not parse integration_entities(%s): %r", domain, raw[:200])
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(x) for x in parsed if isinstance(x, str)]
+
+    async def platforms_for_media_players(self) -> dict[str, str]:
+        """Map media_player entity_id -> integration platform/domain.
+
+        State attributes do not expose config_entry_id/platform. Use
+        integration_entities() for known domains (reliable with homeassistant_api).
+        """
+        mapping: dict[str, str] = {}
+        for domain in sorted(TRACKED_DOMAINS):
+            try:
+                entity_ids = await self.integration_entity_ids(domain)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("integration_entities(%s) failed: %s", domain, exc)
+                continue
+            for entity_id in entity_ids:
+                if entity_id.startswith("media_player."):
+                    mapping[entity_id] = domain
+            LOGGER.info(
+                "Discovered %s media_player(s) for integration %s",
+                sum(1 for e in entity_ids if e.startswith("media_player.")),
+                domain,
+            )
+        return mapping
+
     async def call_service(
         self, domain: str, service: str, data: dict[str, Any] | None = None
     ) -> Any:
@@ -120,17 +171,6 @@ class HomeAssistantClient:
         )
 
 
-def _entry_domain_map(entries: list[dict[str, Any]]) -> dict[str, str]:
-    """Map config_entry_id -> integration domain."""
-    out: dict[str, str] = {}
-    for entry in entries:
-        entry_id = entry.get("entry_id") or entry.get("entryId")
-        domain = entry.get("domain")
-        if entry_id and domain:
-            out[str(entry_id)] = str(domain)
-    return out
-
-
 def _ip_from_attributes(attrs: dict[str, Any]) -> str | None:
     for key in ("ip_address", "host", "hostname", "ip"):
         val = attrs.get(key)
@@ -141,26 +181,30 @@ def _ip_from_attributes(attrs: dict[str, Any]) -> str | None:
 
 def classify_media_players(
     states: list[dict[str, Any]],
-    entries: list[dict[str, Any]],
+    platform_by_entity: dict[str, str],
 ) -> dict[str, Any]:
     """Split media_player entities into eligible vs skipped (native Cast)."""
-    domain_by_entry = _entry_domain_map(entries)
     cast_ips: set[str] = set()
     cast_entity_ids: set[str] = set()
     players: list[dict[str, Any]] = []
+    media_player_total = 0
 
     for state in states:
         entity_id = str(state.get("entity_id") or "")
         if not entity_id.startswith("media_player."):
             continue
+        media_player_total += 1
         attrs = state.get("attributes") or {}
         if not isinstance(attrs, dict):
             attrs = {}
-        entry_id = attrs.get("config_entry_id") or attrs.get("entry_id")
-        domain = domain_by_entry.get(str(entry_id), "") if entry_id else ""
-        # Fallback: platform attribute sometimes present
-        if not domain and isinstance(attrs.get("platform"), str):
-            domain = attrs["platform"]
+        domain = platform_by_entity.get(entity_id, "")
+        # Soft fallbacks (rarely present on state)
+        if not domain:
+            entry_hint = attrs.get("config_entry_id") or attrs.get("entry_id")
+            if isinstance(attrs.get("platform"), str):
+                domain = attrs["platform"]
+            elif entry_hint:
+                domain = "unknown"
         ip = _ip_from_attributes(attrs)
         item = {
             "entity_id": entity_id,
@@ -196,4 +240,12 @@ def classify_media_players(
         "eligible": sorted(eligible, key=lambda x: str(x["friendly_name"]).lower()),
         "skipped": sorted(skipped, key=lambda x: str(x["friendly_name"]).lower()),
         "cast_entity_ids": sorted(cast_entity_ids),
+        "diagnostics": {
+            "media_player_total": media_player_total,
+            "tracked_platforms": {
+                domain: sum(1 for d in platform_by_entity.values() if d == domain)
+                for domain in sorted(TRACKED_DOMAINS)
+            },
+            "platform_mapped": len(platform_by_entity),
+        },
     }

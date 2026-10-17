@@ -85,11 +85,11 @@ class AppState:
         assert self.ha
         states = await self.ha.get_states()
         try:
-            entries = await self.ha.get_config_entries()
+            platforms = await self.ha.platforms_for_media_players()
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("config_entries unavailable: %s", exc)
-            entries = []
-        classified = classify_media_players(states, entries)
+            LOGGER.warning("platform discovery failed: %s", exc)
+            platforms = {}
+        classified = classify_media_players(states, platforms)
         self.entity_meta = {
             item["entity_id"]: item
             for item in classified["eligible"] + classified["skipped"]
@@ -156,6 +156,7 @@ async def api_devices(_: web.Request) -> web.Response:
         {
             "eligible": classified["eligible"],
             "skipped": classified["skipped"],
+            "diagnostics": classified.get("diagnostics") or {},
             "config": cfg,
             "sizing_formula": "128 + (N × 12) + (max_concurrent_streams × 48)",
         }
