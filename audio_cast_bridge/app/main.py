@@ -66,8 +66,15 @@ class AppState:
             return False
         if not self.ha:
             return False
+        LOGGER.info("Cast load for %s source=%s…", entity_id, source_url[:96])
         public = await self.relay.start(entity_id, source_url)
-        await self.ha.play_media(entity_id, public)
+        ready = await self.relay.wait_ready(entity_id, timeout=15.0)
+        if not ready:
+            LOGGER.error("Cast load aborted for %s — ffmpeg produced no audio", entity_id)
+            await self.relay.stop(entity_id)
+            return False
+        await self.ha.play_media(entity_id, public, media_type="music")
+        LOGGER.info("Cast load playing %s via %s", entity_id, public)
         route = self.cast.runtime.routes.get(entity_id)
         if route:
             route.casting = True
@@ -108,17 +115,16 @@ class AppState:
         if not self.ha:
             return {"state": "unknown", "attributes": {}}
         try:
-            states = await self.ha.get_states()
+            item = await self.ha.get_state(entity_id)
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug("status poll failed: %s", exc)
             return {"state": "unknown", "attributes": {}}
-        for item in states:
-            if item.get("entity_id") == entity_id:
-                return {
-                    "state": item.get("state") or "unknown",
-                    "attributes": item.get("attributes") or {},
-                }
-        return {"state": "unavailable", "attributes": {}}
+        if not item:
+            return {"state": "unavailable", "attributes": {}}
+        return {
+            "state": item.get("state") or "unknown",
+            "attributes": item.get("attributes") or {},
+        }
 
     async def refresh_entities(self) -> dict[str, Any]:
         assert self.ha

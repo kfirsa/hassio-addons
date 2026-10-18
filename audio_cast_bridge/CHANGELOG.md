@@ -2,6 +2,12 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.1
+
+- Keep Cast session alive while HA is still buffering (do not report IDLE right after connect)
+- Wait for ffmpeg to produce audio before calling `play_media`
+- Harden ffmpeg relay (HTTPS/HLS whitelist, user-agent, stderr logging)
+
 ## 1.1.0
 
 - Ship Vibecast Cast frontend (from cast-audio-receiver-lab `0.6.0-dev29`) so selected speakers advertise on the LAN

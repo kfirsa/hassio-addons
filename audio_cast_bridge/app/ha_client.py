@@ -113,6 +113,13 @@ class HomeAssistantClient:
         data = await self._request("GET", "/api/states")
         return data if isinstance(data, list) else []
 
+    async def get_state(self, entity_id: str) -> dict[str, Any] | None:
+        try:
+            data = await self._request("GET", f"/api/states/{entity_id}")
+        except Exception:  # noqa: BLE001
+            return None
+        return data if isinstance(data, dict) else None
+
     async def get_config_entries(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/api/config/config_entries/entry")
         return data if isinstance(data, list) else []

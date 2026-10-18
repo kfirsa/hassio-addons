@@ -67,6 +67,9 @@ class VibecastPlayerBridge:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self.advertised = False
+        # Local Cast player state — do NOT mirror HA idle while a session is active,
+        # or the phone tears down the session immediately after connect.
+        self._player_state = "IDLE"
 
     def registration(self) -> dict[str, object]:
         return {
@@ -251,8 +254,10 @@ class VibecastPlayerBridge:
                 return
             if command == "play" and self.on_control:
                 await self.on_control(self.entity_id, "play", {})
+                self._player_state = "PLAYING"
             elif command == "pause" and self.on_control:
                 await self.on_control(self.entity_id, "pause", {})
+                self._player_state = "PAUSED"
             elif command == "seek" and self.on_control:
                 await self.on_control(
                     self.entity_id,
@@ -262,6 +267,7 @@ class VibecastPlayerBridge:
             elif command == "stop":
                 await self.on_stop(self.entity_id)
                 self.session_id = None
+                self._player_state = "IDLE"
             await self._send_backend_state(session_id)
         except (OSError, TypeError, ValueError, RuntimeError, ConnectionClosed) as exc:
             LOGGER.error(
@@ -308,8 +314,10 @@ class VibecastPlayerBridge:
             ok = await self.on_load(self.entity_id, url)
             if not ok:
                 raise RuntimeError("HA load rejected")
+            self._player_state = "PLAYING"
         except Exception:
             self.session_id = None
+            self._player_state = "IDLE"
             try:
                 await self.on_stop(self.entity_id)
             except Exception:  # noqa: BLE001
@@ -317,16 +325,16 @@ class VibecastPlayerBridge:
             raise
         finally:
             self._preparing_load = False
-        await self._send_backend_state(session_id)
+        await self._send_state(session_id, "PLAYING", current_time=start_time)
 
     async def _send_backend_state(self, session_id: str) -> None:
         if self._preparing_load:
             return
-        state = "IDLE"
         current_time = 0.0
         volume = None
         muted = None
         idle_reason = None
+        ha_state = ""
         if self.status_provider:
             try:
                 snap = await self.status_provider(self.entity_id)
@@ -334,14 +342,6 @@ class VibecastPlayerBridge:
                 LOGGER.debug("status_provider failed: %s", exc)
                 snap = {}
             ha_state = str(snap.get("state") or "")
-            if ha_state == "playing":
-                state = "PLAYING"
-            elif ha_state == "paused":
-                state = "PAUSED"
-            elif ha_state in {"idle", "off", "standby", "unavailable", "unknown"}:
-                state = "IDLE"
-                if self.session_id is None:
-                    idle_reason = "FINISHED"
             attrs = snap.get("attributes") or {}
             if isinstance(attrs, dict):
                 pos = attrs.get("media_position")
@@ -352,8 +352,25 @@ class VibecastPlayerBridge:
                     volume = float(vol)
                 if "is_volume_muted" in attrs:
                     muted = bool(attrs.get("is_volume_muted"))
-        elif self.session_id == session_id:
-            state = "PLAYING"
+
+        # While a Cast session is active, never report IDLE just because HA has
+        # not flipped to "playing" yet — that aborts the phone session.
+        if self.session_id == session_id:
+            if ha_state == "playing":
+                state = "PLAYING"
+                self._player_state = "PLAYING"
+            elif ha_state == "paused" or self._player_state == "PAUSED":
+                state = "PAUSED"
+                self._player_state = "PAUSED"
+            elif ha_state in {"buffering"}:
+                state = "BUFFERING"
+            else:
+                state = self._player_state if self._player_state != "IDLE" else "PLAYING"
+        else:
+            state = "IDLE"
+            idle_reason = "FINISHED" if self._player_state != "IDLE" else None
+            self._player_state = "IDLE"
+
         await self._send_state(
             session_id,
             state,

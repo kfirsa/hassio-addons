@@ -1,6 +1,6 @@
 ---
 name: Audio Cast Bridge
-version: 1.1.0
+version: 1.1.1
 slug: audio_cast_bridge
 description: Cast V2 bridge for LinkPlay and DLNA speakers without native Google Cast
 url: https://github.com/kfirsa/hassio-addons
