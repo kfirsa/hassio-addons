@@ -7,7 +7,7 @@ FROM ${CAST_LAB_IMAGE} AS cast-lab
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8 \
-    ADDON_VERSION=1.1.2 \
+    ADDON_VERSION=1.1.3 \
     PYTHONUNBUFFERED=1 \
     CAST_FRONTEND_BIN=/usr/local/bin/vibecast \
     ACB_APP_DIR=/opt/audio_cast_bridge \

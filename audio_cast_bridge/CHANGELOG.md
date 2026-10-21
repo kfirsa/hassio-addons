@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.3
+
+- Default stream URL host is `{hostname}.local`; set `stream_host` to a LAN IP if speakers cannot resolve mDNS
+
 ## 1.1.2
 
 - Fix stream dying before speakers connect: ffmpeg no longer drains the whole track with zero HTTP listeners

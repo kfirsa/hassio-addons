@@ -4,7 +4,7 @@
 # ==============================================================================
 set -e
 
-bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.2}..."
+bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.3}..."
 
 mkdir -p /data/log /data/private /data/frontend
 chmod 750 /data/log
@@ -17,22 +17,20 @@ LOG_LEVEL=$(bashio::config 'log_level')
 CERT_PATH=$(bashio::config 'certificate_path')
 STREAM_HOST=$(bashio::config 'stream_host')
 
-# Speakers must resolve the stream URL. Prefer an explicit option, then LAN IP,
-# then hostname (often "homeassistant" which many LinkPlay devices cannot resolve).
-lan_ip() {
-    ip -4 route get 1.1.1.1 2>/dev/null \
-        | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
-}
-
+# Default stream URL host is "<hostname>.local" (mDNS). Override with stream_host
+# (e.g. a LAN IP) if speakers cannot resolve .local names.
 HOST_HINT="${STREAM_HOST}"
 if [[ -z "${HOST_HINT}" || "${HOST_HINT}" == "null" ]]; then
-    HOST_HINT="$(lan_ip || true)"
-fi
-if [[ -z "${HOST_HINT}" ]] && bashio::supervisor.ping; then
-    HOST_HINT=$(bashio::host.hostname 2>/dev/null || true)
-fi
-if [[ -z "${HOST_HINT}" ]]; then
-    HOST_HINT="homeassistant.local"
+    NAME=""
+    if bashio::supervisor.ping; then
+        NAME=$(bashio::host.hostname 2>/dev/null || true)
+    fi
+    NAME="${NAME%%.*}"
+    if [[ -n "${NAME}" ]]; then
+        HOST_HINT="${NAME}.local"
+    else
+        HOST_HINT="homeassistant.local"
+    fi
 fi
 
 cat > /data/acb.env <<EOF
@@ -43,7 +41,7 @@ export ACB_LOG_LEVEL='${LOG_LEVEL}'
 export ACB_HOST_HINT='${HOST_HINT}'
 export ACB_DATA_DIR='/data'
 export ACB_INGRESS_PORT='8099'
-export ADDON_VERSION='${ADDON_VERSION:-1.1.2}'
+export ADDON_VERSION='${ADDON_VERSION:-1.1.3}'
 export CAST_FRONTEND_BIN='${CAST_FRONTEND_BIN:-/usr/local/bin/vibecast}'
 export ACB_VIBECAST_CONFIG_TEMPLATE='${ACB_VIBECAST_CONFIG_TEMPLATE:-/usr/share/audio_cast_bridge/vibecast-audio.toml}'
 EOF

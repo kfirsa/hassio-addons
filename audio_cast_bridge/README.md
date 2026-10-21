@@ -42,7 +42,7 @@ Phones may take ~30s for mDNS before the name appears in the Cast picker.
 | `dial_base_port` | Reserved (legacy) | `3100` |
 | `log_level` | `DEBUG` / `INFO` / `WARNING` / `ERROR` | `INFO` |
 | `certificate_path` | Optional absolute path to a local BYO auth bundle | empty |
-| `stream_host` | Host/IP used in speaker stream URLs (blank = auto LAN IP) | empty |
+| `stream_host` | Override stream URL host (blank = `{hostname}.local`) | empty |
 
 Device selection is stored under add-on `/data` (not in Supervisor options).
 
