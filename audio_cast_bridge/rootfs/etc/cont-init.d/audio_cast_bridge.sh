@@ -4,7 +4,7 @@
 # ==============================================================================
 set -e
 
-bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.0}..."
+bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.2}..."
 
 mkdir -p /data/log /data/private /data/frontend
 chmod 750 /data/log
@@ -15,9 +15,20 @@ MAX_STREAMS=$(bashio::config 'max_concurrent_streams')
 STREAM_PORT=$(bashio::config 'stream_port')
 LOG_LEVEL=$(bashio::config 'log_level')
 CERT_PATH=$(bashio::config 'certificate_path')
+STREAM_HOST=$(bashio::config 'stream_host')
 
-HOST_HINT=""
-if bashio::supervisor.ping; then
+# Speakers must resolve the stream URL. Prefer an explicit option, then LAN IP,
+# then hostname (often "homeassistant" which many LinkPlay devices cannot resolve).
+lan_ip() {
+    ip -4 route get 1.1.1.1 2>/dev/null \
+        | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+}
+
+HOST_HINT="${STREAM_HOST}"
+if [[ -z "${HOST_HINT}" || "${HOST_HINT}" == "null" ]]; then
+    HOST_HINT="$(lan_ip || true)"
+fi
+if [[ -z "${HOST_HINT}" ]] && bashio::supervisor.ping; then
     HOST_HINT=$(bashio::host.hostname 2>/dev/null || true)
 fi
 if [[ -z "${HOST_HINT}" ]]; then
@@ -32,16 +43,16 @@ export ACB_LOG_LEVEL='${LOG_LEVEL}'
 export ACB_HOST_HINT='${HOST_HINT}'
 export ACB_DATA_DIR='/data'
 export ACB_INGRESS_PORT='8099'
-export ADDON_VERSION='${ADDON_VERSION:-1.1.0}'
+export ADDON_VERSION='${ADDON_VERSION:-1.1.2}'
 export CAST_FRONTEND_BIN='${CAST_FRONTEND_BIN:-/usr/local/bin/vibecast}'
 export ACB_VIBECAST_CONFIG_TEMPLATE='${ACB_VIBECAST_CONFIG_TEMPLATE:-/usr/share/audio_cast_bridge/vibecast-audio.toml}'
 EOF
 
-if [[ -n "${CERT_PATH}" ]]; then
+if [[ -n "${CERT_PATH}" && "${CERT_PATH}" != "null" ]]; then
     echo "export ACB_CERTS_PATH='${CERT_PATH}'" >> /data/acb.env
 fi
 
-bashio::log.info "Host hint for streams: ${HOST_HINT}"
+bashio::log.info "Stream URL host for speakers: ${HOST_HINT}"
 bashio::log.info "max_bridges=${MAX_BRIDGES} max_concurrent_streams=${MAX_STREAMS} stream_port=${STREAM_PORT}"
 bashio::log.info "Cast frontend: ${CAST_FRONTEND_BIN:-/usr/local/bin/vibecast}"
 bashio::log.info "Initialization complete"

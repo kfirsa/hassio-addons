@@ -19,6 +19,7 @@ class StreamSession:
     listeners: set[asyncio.Queue[bytes | None]] = field(default_factory=set)
     started: bool = False
     ready: asyncio.Event = field(default_factory=asyncio.Event)
+    listener_event: asyncio.Event = field(default_factory=asyncio.Event)
     bytes_sent: int = 0
     last_error: str = ""
 
@@ -50,8 +51,8 @@ class StreamRelayHub:
                 await self._stop_locked(entity_id)
             session = StreamSession(entity_id=entity_id, source_url=source_url)
             self._sessions[entity_id] = session
-            # No -re: network sources should be pulled and remuxed as data arrives.
             # Protocol whitelist + UA help with signed HTTPS / HLS from Cast providers.
+            # Do NOT use -re: backpressure from the pump (wait for listeners) paces output.
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -116,21 +117,64 @@ class StreamRelayHub:
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug("stderr drain ended for %s: %s", session.entity_id, exc)
 
+    async def _wait_for_listeners(self, session: StreamSession) -> bool:
+        """Block until an HTTP listener joins, or ffmpeg dies."""
+        while not session.listeners:
+            proc = session.process
+            if proc is None or proc.returncode is not None:
+                return False
+            session.listener_event.clear()
+            try:
+                await asyncio.wait_for(session.listener_event.wait(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+        return True
+
     async def _pump(self, session: StreamSession) -> None:
         assert session.process and session.process.stdout
+        prebuffer = b""
         try:
+            # Confirm ffmpeg can produce audio, then STOP reading until a speaker
+            # connects. Previously we drained the whole track with zero listeners
+            # and the relay ended before LinkPlay fetched the URL.
+            first = await session.process.stdout.read(4096)
+            if not first:
+                LOGGER.error(
+                    "ffmpeg relay for %s exited before producing audio (stderr=%r)",
+                    session.entity_id,
+                    (session.last_error or "")[-300:],
+                )
+                return
+            prebuffer = first
+            session.bytes_sent += len(first)
+            session.ready.set()
+            LOGGER.info(
+                "ffmpeg relay ready for %s (prebuffer=%s bytes); waiting for HTTP listener",
+                session.entity_id,
+                len(first),
+            )
+
             while True:
-                chunk = await session.process.stdout.read(4096)
-                if not chunk:
-                    break
-                session.bytes_sent += len(chunk)
-                if not session.ready.is_set():
-                    session.ready.set()
+                if not await self._wait_for_listeners(session):
                     LOGGER.info(
-                        "ffmpeg relay ready for %s (first %s bytes)",
+                        "ffmpeg relay for %s ending — no listeners and process stopped",
                         session.entity_id,
-                        len(chunk),
                     )
+                    break
+
+                if prebuffer:
+                    chunk = prebuffer
+                    prebuffer = b""
+                    LOGGER.info(
+                        "HTTP listener connected for %s — starting audio fan-out",
+                        session.entity_id,
+                    )
+                else:
+                    chunk = await session.process.stdout.read(4096)
+                    if not chunk:
+                        break
+                    session.bytes_sent += len(chunk)
+
                 dead: list[asyncio.Queue[bytes | None]] = []
                 for queue in list(session.listeners):
                     try:
@@ -139,6 +183,14 @@ class StreamRelayHub:
                         dead.append(queue)
                 for queue in dead:
                     session.listeners.discard(queue)
+                if not session.listeners and not prebuffer:
+                    # All listeners dropped mid-stream — pause reads so ffmpeg blocks
+                    # on the pipe instead of racing through the rest of the track.
+                    LOGGER.info(
+                        "All listeners gone for %s — pausing ffmpeg read (bytes=%s)",
+                        session.entity_id,
+                        session.bytes_sent,
+                    )
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Relay pump error for %s: %s", session.entity_id, exc)
         finally:
@@ -156,10 +208,11 @@ class StreamRelayHub:
                     pass
             session.listeners.clear()
             LOGGER.info(
-                "Relay ended for %s (bytes=%s ready=%s)",
+                "Relay ended for %s (bytes=%s ready=%s listeners=%s)",
                 session.entity_id,
                 session.bytes_sent,
                 session.ready.is_set(),
+                len(session.listeners),
             )
 
     async def stop(self, entity_id: str) -> None:
@@ -181,6 +234,7 @@ class StreamRelayHub:
                     await proc.wait()
             except ProcessLookupError:
                 pass
+        session.listener_event.set()
         for queue in list(session.listeners):
             try:
                 queue.put_nowait(None)
@@ -204,6 +258,12 @@ class StreamRelayHub:
             return None
         queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=256)
         session.listeners.add(queue)
+        session.listener_event.set()
+        LOGGER.info(
+            "Stream subscribe for %s (listeners=%s)",
+            session.entity_id,
+            len(session.listeners),
+        )
         return queue
 
     def active_count(self) -> int:
@@ -219,7 +279,8 @@ class StreamRelayHub:
             out.append(
                 {
                     "entity_id": eid,
-                    "source_url": sess.source_url[:120] + ("…" if len(sess.source_url) > 120 else ""),
+                    "source_url": sess.source_url[:120]
+                    + ("…" if len(sess.source_url) > 120 else ""),
                     "listeners": len(sess.listeners),
                     "running": sess.process is not None and sess.process.returncode is None,
                     "ready": sess.ready.is_set(),

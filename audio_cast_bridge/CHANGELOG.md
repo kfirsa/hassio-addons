@@ -2,6 +2,12 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.2
+
+- Fix stream dying before speakers connect: ffmpeg no longer drains the whole track with zero HTTP listeners
+- Prefer LAN IP for stream URLs (speakers often cannot resolve hostname `homeassistant`)
+- Optional Supervisor option `stream_host` to override the stream URL host
+
 ## 1.1.1
 
 - Keep Cast session alive while HA is still buffering (do not report IDLE right after connect)

@@ -1,6 +1,6 @@
 ---
 name: Audio Cast Bridge
-version: 1.1.1
+version: 1.1.2
 slug: audio_cast_bridge
 description: Cast V2 bridge for LinkPlay and DLNA speakers without native Google Cast
 url: https://github.com/kfirsa/hassio-addons
@@ -29,6 +29,7 @@ options:
   dial_base_port: 3100
   log_level: INFO
   certificate_path: ""
+  stream_host: ""
 schema:
   max_bridges: int(1,16)
   max_concurrent_streams: int(1,8)
@@ -36,3 +37,4 @@ schema:
   dial_base_port: port
   log_level: list(DEBUG|INFO|WARNING|ERROR)
   certificate_path: str
+  stream_host: str
