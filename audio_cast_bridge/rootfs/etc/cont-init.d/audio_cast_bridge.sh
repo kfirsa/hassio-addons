@@ -4,7 +4,7 @@
 # ==============================================================================
 set -e
 
-bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.3}..."
+bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.4}..."
 
 mkdir -p /data/log /data/private /data/frontend
 chmod 750 /data/log
@@ -19,6 +19,12 @@ STREAM_HOST=$(bashio::config 'stream_host')
 
 # Default stream URL host is "<hostname>.local" (mDNS). Override with stream_host
 # (e.g. a LAN IP) if speakers cannot resolve .local names.
+lan_ip() {
+    ip -4 route get 1.1.1.1 2>/dev/null \
+        | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+}
+LAN_IP="$(lan_ip || true)"
+
 HOST_HINT="${STREAM_HOST}"
 if [[ -z "${HOST_HINT}" || "${HOST_HINT}" == "null" ]]; then
     NAME=""
@@ -39,9 +45,10 @@ export ACB_MAX_CONCURRENT_STREAMS='${MAX_STREAMS}'
 export ACB_STREAM_PORT='${STREAM_PORT}'
 export ACB_LOG_LEVEL='${LOG_LEVEL}'
 export ACB_HOST_HINT='${HOST_HINT}'
+export ACB_LAN_IP='${LAN_IP}'
 export ACB_DATA_DIR='/data'
 export ACB_INGRESS_PORT='8099'
-export ADDON_VERSION='${ADDON_VERSION:-1.1.3}'
+export ADDON_VERSION='${ADDON_VERSION:-1.1.4}'
 export CAST_FRONTEND_BIN='${CAST_FRONTEND_BIN:-/usr/local/bin/vibecast}'
 export ACB_VIBECAST_CONFIG_TEMPLATE='${ACB_VIBECAST_CONFIG_TEMPLATE:-/usr/share/audio_cast_bridge/vibecast-audio.toml}'
 EOF

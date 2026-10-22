@@ -34,8 +34,11 @@ class StreamRelayHub:
         self._lock = asyncio.Lock()
 
     def public_url(self, entity_id: str) -> str:
+        return self.url_for_host(entity_id, self.host_hint)
+
+    def url_for_host(self, entity_id: str, host: str) -> str:
         slug = entity_id.replace(".", "_")
-        return f"http://{self.host_hint}:{self.stream_port}/stream/{slug}"
+        return f"http://{host}:{self.stream_port}/stream/{slug}"
 
     def slug(self, entity_id: str) -> str:
         return entity_id.replace(".", "_")
@@ -43,6 +46,31 @@ class StreamRelayHub:
     def is_running(self, entity_id: str) -> bool:
         sess = self._sessions.get(entity_id)
         return bool(sess and sess.process and sess.process.returncode is None)
+
+    def listener_count(self, entity_id: str) -> int:
+        sess = self._sessions.get(entity_id)
+        return len(sess.listeners) if sess else 0
+
+    async def wait_listener(self, entity_id: str, timeout: float = 12.0) -> bool:
+        """Wait until at least one HTTP client is subscribed to this stream."""
+        sess = self._sessions.get(entity_id)
+        if not sess:
+            return False
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if sess.listeners:
+                return True
+            if sess.process is None or sess.process.returncode is not None:
+                return False
+            sess.listener_event.clear()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                await asyncio.wait_for(sess.listener_event.wait(), timeout=min(0.5, remaining))
+            except asyncio.TimeoutError:
+                continue
+        return bool(sess.listeners)
 
     async def start(self, entity_id: str, source_url: str) -> str:
         async with self._lock:

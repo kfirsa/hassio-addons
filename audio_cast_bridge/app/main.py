@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import signal
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,25 @@ WEB_ROOT = Path(__file__).resolve().parent / "web"
 INGRESS_PORT = int(os.environ.get("ACB_INGRESS_PORT", "8099"))
 STREAM_PORT = int(os.environ.get("ACB_STREAM_PORT", "18080"))
 HOST_HINT = os.environ.get("ACB_HOST_HINT", "homeassistant.local")
+
+
+def detect_lan_ip() -> str | None:
+    """Best-effort primary LAN IPv4 for stream URL fallback."""
+    explicit = os.environ.get("ACB_LAN_IP", "").strip()
+    if explicit:
+        return explicit
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("1.1.1.1", 80))
+            ip = sock.getsockname()[0]
+        finally:
+            sock.close()
+        if ip and not ip.startswith("127."):
+            return ip
+    except OSError:
+        pass
+    return None
 
 
 class AppState:
@@ -75,6 +95,43 @@ class AppState:
             return False
         await self.ha.play_media(entity_id, public, media_type="music")
         LOGGER.info("Cast load playing %s via %s", entity_id, public)
+
+        # LinkPlay often cannot resolve *.local — wait for HTTP fetch, then retry with LAN IP.
+        if not await self.relay.wait_listener(entity_id, timeout=10.0):
+            lan_ip = detect_lan_ip()
+            if lan_ip and lan_ip not in public:
+                alt = self.relay.url_for_host(entity_id, lan_ip)
+                LOGGER.warning(
+                    "No HTTP listener for %s after play_media(%s). "
+                    "Retrying with LAN IP URL %s — set add-on option stream_host=%s if this works",
+                    entity_id,
+                    public,
+                    alt,
+                    lan_ip,
+                )
+                await self.ha.play_media(entity_id, alt, media_type="music")
+                if not await self.relay.wait_listener(entity_id, timeout=10.0):
+                    LOGGER.error(
+                        "Speaker still did not fetch the stream for %s. "
+                        "Check stream_host / firewall / that the device can reach port %s",
+                        entity_id,
+                        self.relay.stream_port,
+                    )
+                    await self.relay.stop(entity_id)
+                    return False
+            else:
+                LOGGER.error(
+                    "Speaker never fetched stream %s — set stream_host to your HA LAN IP",
+                    public,
+                )
+                await self.relay.stop(entity_id)
+                return False
+
+        LOGGER.info(
+            "HTTP listener connected for %s (listeners=%s)",
+            entity_id,
+            self.relay.listener_count(entity_id),
+        )
         route = self.cast.runtime.routes.get(entity_id)
         if route:
             route.casting = True

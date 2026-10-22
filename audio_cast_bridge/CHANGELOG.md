@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.4
+
+- If no speaker fetches the `.local` stream URL within 10s, retry `play_media` with the LAN IP and log a clear `stream_host` hint
+
 ## 1.1.3
 
 - Default stream URL host is `{hostname}.local`; set `stream_host` to a LAN IP if speakers cannot resolve mDNS
