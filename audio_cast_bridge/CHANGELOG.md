@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.8
+
+- Fix stream relay crash: restore missing `_fanout` so audio actually reaches speakers after connect
+
 ## 1.1.7
 
 - Fix Cast session abort: out-of-band volume must not report IDLE before/during load (phones tear down the bridge); serialize websocket sends

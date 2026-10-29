@@ -158,6 +158,17 @@ class StreamRelayHub:
                 continue
         return True
 
+    async def _fanout(self, session: StreamSession, chunk: bytes) -> None:
+        """Deliver chunk to every listener; await slow queues instead of dropping."""
+        dead: list[asyncio.Queue[bytes | None]] = []
+        for queue in list(session.listeners):
+            try:
+                await queue.put(chunk)
+            except Exception:  # noqa: BLE001
+                dead.append(queue)
+        for queue in dead:
+            session.listeners.discard(queue)
+
     async def _pump(self, session: StreamSession) -> None:
         assert session.process and session.process.stdout
         prebuffer = b""
