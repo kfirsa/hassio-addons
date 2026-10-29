@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.10
+
+- Fix YouTube Cast autoplay 403: ffmpeg now uses a client-matched User-Agent/Referer for googlevideo URLs (`c=ANDROID` etc.) instead of `AudioCastBridge/1.1`
+
 ## 1.1.9
 
 - Autoplay next track: when ffmpeg finishes a stream, report Cast `IDLE`/`FINISHED` so Vibecast/YouTube can load the next song

@@ -7,8 +7,55 @@ import logging
 import signal
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
+from urllib.parse import parse_qs, urlparse
 
 LOGGER = logging.getLogger("acb.stream")
+
+# YouTube CDN binds videoplayback URLs to the InnerTube client in `c=`.
+# Fetching with a mismatched User-Agent yields HTTP 403 (breaks Cast autoplay).
+_DEFAULT_UA = "AudioCastBridge/1.1"
+_YT_ANDROID_UA = (
+    "com.google.android.youtube/19.47.43 "
+    "(Linux; U; Android 14; en_US) gzip"
+)
+_YT_IOS_UA = (
+    "com.google.ios.youtube/19.47.7 "
+    "(iPhone14,5; U; CPU iOS 17_6 like Mac OS X)"
+)
+_YT_WEB_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/128.0.0.0 Safari/537.36"
+)
+_YT_REFERER_HEADERS = (
+    "Referer: https://www.youtube.com/\r\n"
+    "Origin: https://www.youtube.com\r\n"
+)
+
+
+def _youtube_client(source_url: str) -> str | None:
+    """Return InnerTube client name from a googlevideo/youtube URL, if any."""
+    try:
+        parsed = urlparse(source_url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if "googlevideo.com" not in host and "youtube.com" not in host:
+        return None
+    clients = parse_qs(parsed.query).get("c") or []
+    return clients[0].upper() if clients else "WEB"
+
+
+def _ffmpeg_input_auth(source_url: str) -> tuple[str, str | None]:
+    """User-Agent (+ optional -headers) for ffmpeg to open source_url."""
+    client = _youtube_client(source_url)
+    if client is None:
+        return _DEFAULT_UA, None
+    if client.startswith("ANDROID"):
+        return _YT_ANDROID_UA, _YT_REFERER_HEADERS
+    if client.startswith("IOS"):
+        return _YT_IOS_UA, _YT_REFERER_HEADERS
+    return _YT_WEB_UA, _YT_REFERER_HEADERS
 
 
 @dataclass
@@ -97,8 +144,17 @@ class StreamRelayHub:
                 generation=self._generation,
             )
             self._sessions[entity_id] = session
-            # Protocol whitelist + UA help with signed HTTPS / HLS from Cast providers.
+            # Protocol whitelist + client-matched UA for signed HTTPS (YouTube CDN).
             # Do NOT use -re: backpressure from the pump (wait for listeners) paces output.
+            user_agent, extra_headers = _ffmpeg_input_auth(source_url)
+            yt_client = _youtube_client(source_url)
+            if yt_client:
+                LOGGER.info(
+                    "YouTube stream for %s client=%s ua=%s",
+                    entity_id,
+                    yt_client,
+                    user_agent.split()[0],
+                )
             cmd = [
                 "ffmpeg",
                 "-hide_banner",
@@ -107,18 +163,24 @@ class StreamRelayHub:
                 "-protocol_whitelist",
                 "file,http,https,tcp,tls,crypto,httpproxy",
                 "-user_agent",
-                "AudioCastBridge/1.1",
-                "-i",
-                source_url,
-                "-vn",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                "192k",
-                "-f",
-                "mp3",
-                "pipe:1",
+                user_agent,
             ]
+            if extra_headers:
+                cmd.extend(["-headers", extra_headers])
+            cmd.extend(
+                [
+                    "-i",
+                    source_url,
+                    "-vn",
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "192k",
+                    "-f",
+                    "mp3",
+                    "pipe:1",
+                ]
+            )
             LOGGER.info("Starting ffmpeg relay for %s", entity_id)
             session.process = await asyncio.create_subprocess_exec(
                 *cmd,

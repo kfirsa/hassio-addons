@@ -4,7 +4,7 @@
 # ==============================================================================
 set -e
 
-bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.9}..."
+bashio::log.info "Initializing Audio Cast Bridge v${ADDON_VERSION:-1.1.10}..."
 
 mkdir -p /data/log /data/private /data/frontend
 chmod 750 /data/log
@@ -48,7 +48,7 @@ export ACB_HOST_HINT='${HOST_HINT}'
 export ACB_LAN_IP='${LAN_IP}'
 export ACB_DATA_DIR='/data'
 export ACB_INGRESS_PORT='8099'
-export ADDON_VERSION='${ADDON_VERSION:-1.1.9}'
+export ADDON_VERSION='${ADDON_VERSION:-1.1.10}'
 export CAST_FRONTEND_BIN='${CAST_FRONTEND_BIN:-/usr/local/bin/vibecast}'
 export ACB_VIBECAST_CONFIG_TEMPLATE='${ACB_VIBECAST_CONFIG_TEMPLATE:-/usr/share/audio_cast_bridge/vibecast-audio.toml}'
 EOF
