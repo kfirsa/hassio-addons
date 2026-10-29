@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.9
+
+- Autoplay next track: when ffmpeg finishes a stream, report Cast `IDLE`/`FINISHED` so Vibecast/YouTube can load the next song
+
 ## 1.1.8
 
 - Fix stream relay crash: restore missing `_fanout` so audio actually reaches speakers after connect

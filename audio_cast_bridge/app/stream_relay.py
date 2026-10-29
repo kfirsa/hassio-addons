@@ -6,7 +6,7 @@ import asyncio
 import logging
 import signal
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 LOGGER = logging.getLogger("acb.stream")
 
@@ -22,16 +22,25 @@ class StreamSession:
     listener_event: asyncio.Event = field(default_factory=asyncio.Event)
     bytes_sent: int = 0
     last_error: str = ""
+    stop_requested: bool = False
+    generation: int = 0
 
 
 class StreamRelayHub:
     """One ffmpeg process per entity; fan-out MP3 to HTTP listeners."""
 
-    def __init__(self, host_hint: str = "homeassistant.local", stream_port: int = 18080) -> None:
+    def __init__(
+        self,
+        host_hint: str = "homeassistant.local",
+        stream_port: int = 18080,
+        on_ended: Callable[[str, int], Awaitable[None]] | None = None,
+    ) -> None:
         self.host_hint = host_hint
         self.stream_port = stream_port
+        self.on_ended = on_ended
         self._sessions: dict[str, StreamSession] = {}
         self._lock = asyncio.Lock()
+        self._generation = 0
 
     def public_url(self, entity_id: str) -> str:
         return self.url_for_host(entity_id, self.host_hint)
@@ -42,6 +51,10 @@ class StreamRelayHub:
 
     def slug(self, entity_id: str) -> str:
         return entity_id.replace(".", "_")
+
+    def current_generation(self, entity_id: str) -> int:
+        sess = self._sessions.get(entity_id)
+        return int(sess.generation) if sess else 0
 
     def is_running(self, entity_id: str) -> bool:
         sess = self._sessions.get(entity_id)
@@ -77,7 +90,12 @@ class StreamRelayHub:
             existing = self._sessions.get(entity_id)
             if existing and existing.process and existing.process.returncode is None:
                 await self._stop_locked(entity_id)
-            session = StreamSession(entity_id=entity_id, source_url=source_url)
+            self._generation += 1
+            session = StreamSession(
+                entity_id=entity_id,
+                source_url=source_url,
+                generation=self._generation,
+            )
             self._sessions[entity_id] = session
             # Protocol whitelist + UA help with signed HTTPS / HLS from Cast providers.
             # Do NOT use -re: backpressure from the pump (wait for listeners) paces output.
@@ -172,6 +190,7 @@ class StreamRelayHub:
     async def _pump(self, session: StreamSession) -> None:
         assert session.process and session.process.stdout
         prebuffer = b""
+        natural_end = False
         try:
             # Confirm ffmpeg can produce audio, then STOP reading until a speaker
             # connects. Previously we drained the whole track with zero listeners
@@ -195,6 +214,15 @@ class StreamRelayHub:
 
             while True:
                 if not await self._wait_for_listeners(session):
+                    # ffmpeg exited while waiting for a speaker — treat clean exit as end.
+                    proc = session.process
+                    if (
+                        not session.stop_requested
+                        and proc is not None
+                        and proc.returncode == 0
+                        and session.ready.is_set()
+                    ):
+                        natural_end = True
                     LOGGER.info(
                         "ffmpeg relay for %s ending — no listeners and process stopped",
                         session.entity_id,
@@ -211,6 +239,8 @@ class StreamRelayHub:
                 else:
                     chunk = await session.process.stdout.read(4096)
                     if not chunk:
+                        if not session.stop_requested:
+                            natural_end = True
                         break
                     session.bytes_sent += len(chunk)
 
@@ -240,12 +270,22 @@ class StreamRelayHub:
                     pass
             session.listeners.clear()
             LOGGER.info(
-                "Relay ended for %s (bytes=%s ready=%s listeners=%s)",
+                "Relay ended for %s (bytes=%s ready=%s listeners=%s natural_end=%s)",
                 session.entity_id,
                 session.bytes_sent,
                 session.ready.is_set(),
                 len(session.listeners),
+                natural_end,
             )
+            if natural_end and not session.stop_requested and self.on_ended:
+                try:
+                    await self.on_ended(session.entity_id, session.generation)
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning(
+                        "on_ended failed for %s: %s",
+                        session.entity_id,
+                        type(exc).__name__,
+                    )
 
     async def stop(self, entity_id: str) -> None:
         async with self._lock:
@@ -255,6 +295,7 @@ class StreamRelayHub:
         session = self._sessions.pop(entity_id, None)
         if not session or not session.process:
             return
+        session.stop_requested = True
         proc = session.process
         if proc.returncode is None:
             try:

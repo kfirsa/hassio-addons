@@ -86,6 +86,16 @@ class CastRouteManager:
     def player_ids(self) -> dict[str, str]:
         return dict(self._player_ids)
 
+    def bind_stream_generation(self, entity_id: str, generation: int) -> None:
+        bridge = self._bridges.get(entity_id)
+        if bridge:
+            bridge.bind_stream_generation(generation)
+
+    async def notify_stream_finished(self, entity_id: str, generation: int) -> None:
+        bridge = self._bridges.get(entity_id)
+        if bridge:
+            await bridge.notify_stream_finished(generation)
+
     def provision(
         self,
         selected_entities: list[str],

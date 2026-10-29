@@ -63,15 +63,16 @@ class AppState:
     def __init__(self) -> None:
         self.committed = load_config()
         self.ha: HomeAssistantClient | None = None
-        self.relay = StreamRelayHub(
-            host_hint=HOST_HINT,
-            stream_port=int(self.committed.get("stream_port") or STREAM_PORT),
-        )
         self.cast = CastRouteManager(
             on_load=self.handle_cast_load,
             on_stop=self.handle_cast_stop,
             on_control=self.handle_cast_control,
             status_provider=self.cast_status_provider,
+        )
+        self.relay = StreamRelayHub(
+            host_hint=HOST_HINT,
+            stream_port=int(self.committed.get("stream_port") or STREAM_PORT),
+            on_ended=self.handle_stream_ended,
         )
         self.cast.set_player_ids(load_player_ids())
         self.entity_meta: dict[str, dict[str, Any]] = {}
@@ -88,6 +89,7 @@ class AppState:
             return False
         LOGGER.info("Cast load for %s source=%s…", entity_id, source_url[:96])
         public = await self.relay.start(entity_id, source_url)
+        self.cast.bind_stream_generation(entity_id, self.relay.current_generation(entity_id))
         ready = await self.relay.wait_ready(entity_id, timeout=15.0)
         if not ready:
             LOGGER.error("Cast load aborted for %s — ffmpeg produced no audio", entity_id)
@@ -147,6 +149,14 @@ class AppState:
         route = self.cast.runtime.routes.get(entity_id)
         if route:
             route.casting = False
+
+    async def handle_stream_ended(self, entity_id: str, generation: int) -> None:
+        """ffmpeg finished the track — advance Cast queue via IDLE FINISHED."""
+        LOGGER.info("Relay natural end for %s generation=%s", entity_id, generation)
+        route = self.cast.runtime.routes.get(entity_id)
+        if route:
+            route.casting = False
+        await self.cast.notify_stream_finished(entity_id, generation)
 
     async def handle_cast_control(
         self, entity_id: str, command: str, params: dict[str, Any]

@@ -64,6 +64,8 @@ class VibecastPlayerBridge:
         self._media_session_id: int | None = None
         self._media_session_owner: str | None = None
         self._preparing_load = False
+        self._finished = False
+        self._stream_generation: int | None = None
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._send_lock = asyncio.Lock()
@@ -75,12 +77,34 @@ class VibecastPlayerBridge:
         self._muted: bool | None = None
 
     def _session_player_state(self, session_id: str) -> str:
-        """State to report for session_id — never IDLE while that session is live."""
+        """State to report for session_id — never IDLE while loading/playing."""
         if self.session_id != session_id:
+            return "IDLE"
+        if self._finished:
             return "IDLE"
         if self._preparing_load or self._player_state == "IDLE":
             return "BUFFERING"
         return self._player_state
+
+    def bind_stream_generation(self, generation: int) -> None:
+        """Associate the active Cast load with a relay generation (for end detection)."""
+        self._stream_generation = generation
+
+    async def notify_stream_finished(self, generation: int) -> None:
+        """Relay hit natural EOF — tell Vibecast so queue/autoplay can advance."""
+        if self._stream_generation is not None and generation != self._stream_generation:
+            return
+        if self._preparing_load or self.session_id is None or self._finished:
+            return
+        session_id = self.session_id
+        self._finished = True
+        self._player_state = "IDLE"
+        LOGGER.info(
+            "Stream finished for %s session=%s — reporting IDLE FINISHED",
+            self.entity_id,
+            session_id,
+        )
+        await self._send_state(session_id, "IDLE", idle_reason="FINISHED")
 
     def registration(self) -> dict[str, object]:
         return {
@@ -295,6 +319,8 @@ class VibecastPlayerBridge:
             elif command == "stop":
                 await self.on_stop(self.entity_id)
                 self.session_id = None
+                self._finished = False
+                self._stream_generation = None
                 self._player_state = "IDLE"
             await self._send_backend_state(session_id)
         except (OSError, TypeError, ValueError, RuntimeError, ConnectionClosed) as exc:
@@ -316,6 +342,7 @@ class VibecastPlayerBridge:
 
     async def _load(self, session_id: str, media: Any) -> None:
         self._preparing_load = True
+        self._finished = False
         try:
             if not isinstance(media, dict):
                 raise ValueError("load command has no media object")
@@ -389,7 +416,11 @@ class VibecastPlayerBridge:
 
         # While a Cast session is active, never report IDLE just because HA has
         # not flipped to "playing" yet — that aborts the phone session.
-        if self.session_id == session_id:
+        # Exception: natural stream EOF sets _finished so Vibecast can autoplay next.
+        if self.session_id == session_id and self._finished:
+            state = "IDLE"
+            idle_reason = "FINISHED"
+        elif self.session_id == session_id:
             if ha_state == "playing":
                 state = "PLAYING"
                 self._player_state = "PLAYING"
