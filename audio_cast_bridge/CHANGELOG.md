@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.7
+
+- Fix Cast session abort: out-of-band volume must not report IDLE before/during load (phones tear down the bridge); serialize websocket sends
+
 ## 1.1.6
 
 - Fix Cast volume control: apply volume immediately (not blocked behind load), echo level to the phone, avoid spurious unmute spam on LinkPlay

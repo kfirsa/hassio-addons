@@ -66,12 +66,21 @@ class VibecastPlayerBridge:
         self._preparing_load = False
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._send_lock = asyncio.Lock()
         self.advertised = False
         # Local Cast player state — do NOT mirror HA idle while a session is active,
         # or the phone tears down the session immediately after connect.
         self._player_state = "IDLE"
         self._volume: float | None = None
         self._muted: bool | None = None
+
+    def _session_player_state(self, session_id: str) -> str:
+        """State to report for session_id — never IDLE while that session is live."""
+        if self.session_id != session_id:
+            return "IDLE"
+        if self._preparing_load or self._player_state == "IDLE":
+            return "BUFFERING"
+        return self._player_state
 
     def registration(self) -> dict[str, object]:
         return {
@@ -258,13 +267,16 @@ class VibecastPlayerBridge:
                         "volume",
                         {"level": level, "muted": muted},
                     )
-                # Echo applied volume immediately so the phone slider does not snap back.
-                await self._send_state(
-                    session_id,
-                    self._player_state if self.session_id == session_id else "IDLE",
-                    volume=level,
-                    muted=muted,
-                )
+                # Volume is handled out-of-band and can arrive before a queued load
+                # sets session_id. Never echo IDLE for an unaccepted session — phones
+                # tear the Cast bridge down. Echo only once this session is live.
+                if self.session_id == session_id:
+                    await self._send_state(
+                        session_id,
+                        self._session_player_state(session_id),
+                        volume=level,
+                        muted=muted,
+                    )
                 return
             if session_id != self.session_id:
                 return
@@ -320,6 +332,7 @@ class VibecastPlayerBridge:
                 raise ValueError("stream has no URL")
             start_time = max(0.0, _finite_number(media.get("startTime", 0.0)))
             self.session_id = session_id
+            self._player_state = "BUFFERING"
             await self._send_state(session_id, "BUFFERING", current_time=start_time)
             LOGGER.info(
                 "load session=%s entity=%s title=%r",
@@ -427,5 +440,7 @@ class VibecastPlayerBridge:
         await self._send(message)
 
     async def _send(self, message: dict[str, object]) -> None:
-        if self._websocket is not None:
-            await self._websocket.send(json.dumps(message, separators=(",", ":")))
+        # Volume is handled out-of-band; serialize sends (websockets is not concurrent-safe).
+        async with self._send_lock:
+            if self._websocket is not None:
+                await self._websocket.send(json.dumps(message, separators=(",", ":")))
