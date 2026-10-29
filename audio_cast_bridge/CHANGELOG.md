@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.5
+
+- Fix cast stopping after a few seconds: apply backpressure to slow speakers instead of dropping the HTTP listener when the queue fills
+
 ## 1.1.4
 
 - If no speaker fetches the `.local` stream URL within 10s, retry `play_media` with the LAN IP and log a clear `stream_host` hint

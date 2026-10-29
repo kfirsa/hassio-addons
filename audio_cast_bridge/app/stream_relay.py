@@ -203,17 +203,10 @@ class StreamRelayHub:
                         break
                     session.bytes_sent += len(chunk)
 
-                dead: list[asyncio.Queue[bytes | None]] = []
-                for queue in list(session.listeners):
-                    try:
-                        queue.put_nowait(chunk)
-                    except asyncio.QueueFull:
-                        dead.append(queue)
-                for queue in dead:
-                    session.listeners.discard(queue)
+                # Backpressure: wait for slow speakers instead of dropping them.
+                # put_nowait+discard caused "plays a few seconds then stops".
+                await self._fanout(session, chunk)
                 if not session.listeners and not prebuffer:
-                    # All listeners dropped mid-stream — pause reads so ffmpeg blocks
-                    # on the pipe instead of racing through the rest of the track.
                     LOGGER.info(
                         "All listeners gone for %s — pausing ffmpeg read (bytes=%s)",
                         session.entity_id,
@@ -284,7 +277,7 @@ class StreamRelayHub:
                     break
         if not session:
             return None
-        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=256)
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
         session.listeners.add(queue)
         session.listener_event.set()
         LOGGER.info(

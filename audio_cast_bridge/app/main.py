@@ -345,8 +345,11 @@ async def stream_handler(request: web.Request) -> web.StreamResponse:
         status=200,
         headers={
             "Content-Type": "audio/mpeg",
-            "Cache-Control": "no-cache",
-            "Connection": "close",
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache",
+            "Accept-Ranges": "none",
+            "Transfer-Encoding": "chunked",
+            "Connection": "keep-alive",
         },
     )
     await resp.prepare(request)
