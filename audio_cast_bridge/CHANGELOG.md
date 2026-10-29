@@ -2,6 +2,10 @@
 
 All notable changes to the Audio Cast Bridge Home Assistant add-on are documented in this file.
 
+## 1.1.6
+
+- Fix Cast volume control: apply volume immediately (not blocked behind load), echo level to the phone, avoid spurious unmute spam on LinkPlay
+
 ## 1.1.5
 
 - Fix cast stopping after a few seconds: apply backpressure to slow speakers instead of dropping the HTTP listener when the queue fills

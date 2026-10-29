@@ -70,6 +70,8 @@ class VibecastPlayerBridge:
         # Local Cast player state — do NOT mirror HA idle while a session is active,
         # or the phone tears down the session immediately after connect.
         self._player_state = "IDLE"
+        self._volume: float | None = None
+        self._muted: bool | None = None
 
     def registration(self) -> dict[str, object]:
         return {
@@ -177,6 +179,13 @@ class VibecastPlayerBridge:
                 message = json.loads(raw)
                 if not isinstance(message, dict):
                     raise ValueError("player command must be an object")
+                # Volume must not wait behind a long load/listener wait.
+                if message.get("type") == "volume":
+                    asyncio.create_task(
+                        self._handle_message(message),
+                        name=f"acb-vol-{self.entity_id}",
+                    )
+                    continue
                 try:
                     commands.put_nowait(message)
                 except asyncio.QueueFull:
@@ -239,16 +248,23 @@ class VibecastPlayerBridge:
                 await self._load(session_id, message.get("media"))
                 return
             if command == "volume":
+                level = max(0.0, min(1.0, _finite_number(message.get("level", 1.0))))
+                muted = bool(message.get("muted", False))
+                self._volume = level
+                self._muted = muted
                 if self.on_control:
                     await self.on_control(
                         self.entity_id,
                         "volume",
-                        {
-                            "level": _finite_number(message.get("level", 1.0)),
-                            "muted": bool(message.get("muted", False)),
-                        },
+                        {"level": level, "muted": muted},
                     )
-                await self._send_backend_state(session_id)
+                # Echo applied volume immediately so the phone slider does not snap back.
+                await self._send_state(
+                    session_id,
+                    self._player_state if self.session_id == session_id else "IDLE",
+                    volume=level,
+                    muted=muted,
+                )
                 return
             if session_id != self.session_id:
                 return
@@ -352,6 +368,11 @@ class VibecastPlayerBridge:
                     volume = float(vol)
                 if "is_volume_muted" in attrs:
                     muted = bool(attrs.get("is_volume_muted"))
+            # Prefer last Cast-applied volume until HA state catches up.
+            if self._volume is not None:
+                volume = self._volume
+            if self._muted is not None:
+                muted = self._muted
 
         # While a Cast session is active, never report IDLE just because HA has
         # not flipped to "playing" yet — that aborts the phone session.

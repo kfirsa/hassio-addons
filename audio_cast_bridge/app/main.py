@@ -161,10 +161,27 @@ class AppState:
             elif command == "seek":
                 await self.ha.media_seek(entity_id, float(params.get("position") or 0.0))
             elif command == "volume":
-                level = float(params.get("level") or 1.0)
+                level = max(0.0, min(1.0, float(params.get("level") or 1.0)))
                 muted = bool(params.get("muted", False))
                 await self.ha.volume_set(entity_id, level)
-                await self.ha.volume_mute(entity_id, muted)
+                # Only touch mute when requested — some LinkPlay stacks glitch on
+                # repeated volume_mute(false) during slider moves.
+                if muted:
+                    await self.ha.volume_mute(entity_id, True)
+                else:
+                    try:
+                        state = await self.ha.get_state(entity_id)
+                        attrs = (state or {}).get("attributes") or {}
+                        if bool(attrs.get("is_volume_muted")):
+                            await self.ha.volume_mute(entity_id, False)
+                    except Exception:  # noqa: BLE001
+                        await self.ha.volume_mute(entity_id, False)
+                LOGGER.info(
+                    "Cast volume → %s level=%.2f muted=%s",
+                    entity_id,
+                    level,
+                    muted,
+                )
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("cast control %s failed for %s: %s", command, entity_id, exc)
 
